@@ -9,6 +9,20 @@ export type TaskStatus =
   | "completed"
   | "failed";
 
+/* ── Auth ── */
+
+export type UserResponse = {
+  user_id: string;
+  username: string;
+  created_at: string;
+};
+
+export type TokenResponse = {
+  access_token: string;
+  token_type: string;
+  user: UserResponse;
+};
+
 /* ── Provider ── */
 
 export type ModelEntry = {

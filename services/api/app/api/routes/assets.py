@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from packages.shared.contracts.auth import UserResponse
 from packages.shared.enums.asset_origin import AssetOrigin
 from packages.shared.enums.asset_type import AssetType
+from services.api.app.dependencies.auth import get_current_user
 from services.api.app.dependencies.services import get_asset_service
 from services.api.app.schemas.assets import AssetCreateRequest, AssetListResponse, AssetResponse
 from services.api.app.services.asset_service import InMemoryAssetService
@@ -12,6 +14,7 @@ router = APIRouter(prefix="/api/v1/assets", tags=["assets"])
 @router.post("", response_model=AssetResponse, status_code=status.HTTP_201_CREATED)
 async def create_asset(
     payload: AssetCreateRequest,
+    _user: UserResponse = Depends(get_current_user),
     asset_service: InMemoryAssetService = Depends(get_asset_service),
 ) -> AssetResponse:
     return asset_service.create_asset(payload)
@@ -23,6 +26,7 @@ async def list_assets(
     category: str | None = None,
     provider_id: str | None = None,
     origin: AssetOrigin | None = None,
+    _user: UserResponse = Depends(get_current_user),
     asset_service: InMemoryAssetService = Depends(get_asset_service),
 ) -> AssetListResponse:
     return asset_service.list_assets(
@@ -36,6 +40,7 @@ async def list_assets(
 @router.get("/{asset_id}", response_model=AssetResponse)
 async def get_asset(
     asset_id: str,
+    _user: UserResponse = Depends(get_current_user),
     asset_service: InMemoryAssetService = Depends(get_asset_service),
 ) -> AssetResponse:
     asset = asset_service.get_asset(asset_id)

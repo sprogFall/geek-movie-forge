@@ -16,9 +16,14 @@ from packages.shared.contracts.providers import (
     ProviderListResponse,
     ProviderResponse,
 )
+from packages.shared.contracts.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
 from packages.shared.contracts.tasks import TaskCreateRequest, TaskResponse
 
 __all__ = [
+    "LoginRequest",
+    "RegisterRequest",
+    "TokenResponse",
+    "UserResponse",
     "AssetCreateRequest",
     "AssetListResponse",
     "AssetResponse",

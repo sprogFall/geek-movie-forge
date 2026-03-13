@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode } from "react";
 
+import { useAuth } from "@/lib/auth";
 import { navigationSections } from "@/lib/navigation";
 
 type AppShellProps = {
@@ -15,6 +16,7 @@ type AppShellProps = {
 
 export function AppShell({ eyebrow, title, description, children }: AppShellProps) {
   const pathname = usePathname();
+  const { user, logout } = useAuth();
 
   return (
     <div className="shell">
@@ -51,9 +53,17 @@ export function AppShell({ eyebrow, title, description, children }: AppShellProp
           ))}
         </nav>
 
-        <section className="sidebar-footer">
-          <strong>Workspace mode</strong>
-          <p>Frontend, API, orchestration and workers now live in one repository.</p>
+        <section className="sidebar-user">
+          <div className="sidebar-user-info">
+            <div className="user-avatar">{user?.username.charAt(0).toUpperCase()}</div>
+            <div>
+              <strong>{user?.username}</strong>
+              <span>Authenticated</span>
+            </div>
+          </div>
+          <button className="btn btn-sm btn-secondary" onClick={logout} type="button">
+            Sign out
+          </button>
         </section>
       </aside>
 

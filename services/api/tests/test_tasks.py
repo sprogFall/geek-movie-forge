@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from services.api.app.main import app
+from services.api.tests.helpers import register_and_get_headers
 
 
 def test_create_task_returns_201_with_task_payload() -> None:
@@ -12,7 +13,8 @@ def test_create_task_returns_201_with_task_payload() -> None:
     }
 
     with TestClient(app) as client:
-        response = client.post("/api/v1/tasks", json=payload)
+        headers = register_and_get_headers(client)
+        response = client.post("/api/v1/tasks", json=payload, headers=headers)
 
     body = response.json()
 
@@ -34,7 +36,8 @@ def test_create_task_rejects_invalid_payload() -> None:
     }
 
     with TestClient(app) as client:
-        response = client.post("/api/v1/tasks", json=payload)
+        headers = register_and_get_headers(client)
+        response = client.post("/api/v1/tasks", json=payload, headers=headers)
 
     assert response.status_code == 422
 
@@ -48,9 +51,10 @@ def test_get_task_returns_existing_task() -> None:
     }
 
     with TestClient(app) as client:
-        create_response = client.post("/api/v1/tasks", json=payload)
+        headers = register_and_get_headers(client)
+        create_response = client.post("/api/v1/tasks", json=payload, headers=headers)
         task_id = create_response.json()["task_id"]
-        response = client.get(f"/api/v1/tasks/{task_id}")
+        response = client.get(f"/api/v1/tasks/{task_id}", headers=headers)
 
     assert response.status_code == 200
     assert response.json()["task_id"] == task_id
@@ -59,7 +63,8 @@ def test_get_task_returns_existing_task() -> None:
 
 def test_get_task_returns_404_for_unknown_task() -> None:
     with TestClient(app) as client:
-        response = client.get("/api/v1/tasks/task_missing")
+        headers = register_and_get_headers(client)
+        response = client.get("/api/v1/tasks/task_missing", headers=headers)
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Task not found"

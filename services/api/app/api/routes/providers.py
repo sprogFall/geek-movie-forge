@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from packages.shared.contracts.auth import UserResponse
+from services.api.app.dependencies.auth import get_current_user
 from services.api.app.dependencies.services import get_provider_service
 from services.api.app.schemas.providers import (
     ProviderConfigCreateRequest,
@@ -20,6 +22,7 @@ router = APIRouter(prefix="/api/v1/providers", tags=["providers"])
 )
 async def create_provider(
     payload: ProviderConfigCreateRequest,
+    _user: UserResponse = Depends(get_current_user),
     provider_service: InMemoryProviderService = Depends(get_provider_service),
 ) -> ProviderResponse:
     return provider_service.create_provider(payload)
@@ -33,6 +36,7 @@ async def create_provider(
 async def update_provider(
     provider_id: str,
     payload: ProviderConfigUpdateRequest,
+    _user: UserResponse = Depends(get_current_user),
     provider_service: InMemoryProviderService = Depends(get_provider_service),
 ) -> ProviderResponse:
     return provider_service.update_provider(provider_id, payload)
@@ -40,6 +44,7 @@ async def update_provider(
 
 @router.get("", response_model=ProviderListResponse, response_model_exclude_none=True)
 async def list_providers(
+    _user: UserResponse = Depends(get_current_user),
     provider_service: InMemoryProviderService = Depends(get_provider_service),
 ) -> ProviderListResponse:
     return provider_service.list_providers()
@@ -52,6 +57,7 @@ async def list_providers(
 )
 async def get_provider(
     provider_id: str,
+    _user: UserResponse = Depends(get_current_user),
     provider_service: InMemoryProviderService = Depends(get_provider_service),
 ) -> ProviderResponse:
     provider = provider_service.get_provider(provider_id)

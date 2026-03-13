@@ -7,6 +7,7 @@ from packages.shared.contracts.generations import (
 )
 from services.api.app.main import app
 from services.api.app.services.generation_service import GenerationService
+from services.api.tests.helpers import register_and_get_headers
 
 
 class FakeProviderGateway(ProviderGateway):
@@ -56,7 +57,7 @@ class FakeProviderGateway(ProviderGateway):
         )
 
 
-def _create_provider(client: TestClient) -> str:
+def _create_provider(client: TestClient, headers: dict[str, str]) -> str:
     response = client.post(
         "/api/v1/providers",
         json={
@@ -69,6 +70,7 @@ def _create_provider(client: TestClient) -> str:
                 {"model": "forge-text-v1", "capabilities": ["text"]},
             ],
         },
+        headers=headers,
     )
     assert response.status_code == 201
     return response.json()["provider_id"]
@@ -78,12 +80,13 @@ def test_generate_image_and_save_assets() -> None:
     fake_gateway = FakeProviderGateway()
 
     with TestClient(app) as client:
+        headers = register_and_get_headers(client)
         app.state.generation_service = GenerationService(
             provider_service=app.state.provider_service,
             asset_service=app.state.asset_service,
             provider_gateway=fake_gateway,
         )
-        provider_id = _create_provider(client)
+        provider_id = _create_provider(client, headers)
 
         response = client.post(
             "/api/v1/generations/images",
@@ -101,8 +104,11 @@ def test_generate_image_and_save_assets() -> None:
                 },
                 "options": {"size": "1024x1024"},
             },
+            headers=headers,
         )
-        list_assets_response = client.get("/api/v1/assets", params={"asset_type": "image"})
+        list_assets_response = client.get(
+            "/api/v1/assets", params={"asset_type": "image"}, headers=headers
+        )
 
     assert response.status_code == 200
     body = response.json()
@@ -120,12 +126,13 @@ def test_generate_video_with_asset_materials() -> None:
     fake_gateway = FakeProviderGateway()
 
     with TestClient(app) as client:
+        headers = register_and_get_headers(client)
         app.state.generation_service = GenerationService(
             provider_service=app.state.provider_service,
             asset_service=app.state.asset_service,
             provider_gateway=fake_gateway,
         )
-        provider_id = _create_provider(client)
+        provider_id = _create_provider(client, headers)
 
         image_asset_response = client.post(
             "/api/v1/assets",
@@ -135,6 +142,7 @@ def test_generate_video_with_asset_materials() -> None:
                 "name": "city-reference",
                 "content_url": "https://cdn.example.com/assets/city.png",
             },
+            headers=headers,
         )
         prompt_asset_response = client.post(
             "/api/v1/assets",
@@ -144,6 +152,7 @@ def test_generate_video_with_asset_materials() -> None:
                 "name": "rain-scene",
                 "content_text": "暴雨、霓虹、追逐、低机位镜头",
             },
+            headers=headers,
         )
 
         response = client.post(
@@ -163,6 +172,7 @@ def test_generate_video_with_asset_materials() -> None:
                 },
                 "options": {"duration_seconds": 8},
             },
+            headers=headers,
         )
 
     assert response.status_code == 200
@@ -182,12 +192,13 @@ def test_generate_text_and_query_saved_materials() -> None:
     fake_gateway = FakeProviderGateway()
 
     with TestClient(app) as client:
+        headers = register_and_get_headers(client)
         app.state.generation_service = GenerationService(
             provider_service=app.state.provider_service,
             asset_service=app.state.asset_service,
             provider_gateway=fake_gateway,
         )
-        provider_id = _create_provider(client)
+        provider_id = _create_provider(client, headers)
 
         response = client.post(
             "/api/v1/generations/texts",
@@ -204,10 +215,12 @@ def test_generate_text_and_query_saved_materials() -> None:
                     "name_prefix": "teaser-script",
                 },
             },
+            headers=headers,
         )
         list_assets_response = client.get(
             "/api/v1/assets",
             params={"asset_type": "text", "category": "scripts"},
+            headers=headers,
         )
 
     assert response.status_code == 200
@@ -225,12 +238,13 @@ def test_generate_rejects_model_without_required_capability() -> None:
     fake_gateway = FakeProviderGateway()
 
     with TestClient(app) as client:
+        headers = register_and_get_headers(client)
         app.state.generation_service = GenerationService(
             provider_service=app.state.provider_service,
             asset_service=app.state.asset_service,
             provider_gateway=fake_gateway,
         )
-        provider_id = _create_provider(client)
+        provider_id = _create_provider(client, headers)
         response = client.post(
             "/api/v1/generations/images",
             json={
@@ -239,6 +253,7 @@ def test_generate_rejects_model_without_required_capability() -> None:
                 "count": 1,
                 "prompt": "不应该通过",
             },
+            headers=headers,
         )
 
     assert response.status_code == 422

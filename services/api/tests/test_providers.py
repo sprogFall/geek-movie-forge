@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from services.api.app.main import app
+from services.api.tests.helpers import register_and_get_headers
 
 
 def test_create_and_update_provider_configuration() -> None:
@@ -15,7 +16,8 @@ def test_create_and_update_provider_configuration() -> None:
     }
 
     with TestClient(app) as client:
-        create_response = client.post("/api/v1/providers", json=create_payload)
+        headers = register_and_get_headers(client)
+        create_response = client.post("/api/v1/providers", json=create_payload, headers=headers)
 
         assert create_response.status_code == 201
         body = create_response.json()
@@ -37,9 +39,11 @@ def test_create_and_update_provider_configuration() -> None:
                 {"model": "forge-video-v1", "capabilities": ["video"]},
             ],
         }
-        update_response = client.put(f"/api/v1/providers/{provider_id}", json=update_payload)
-        list_response = client.get("/api/v1/providers")
-        detail_response = client.get(f"/api/v1/providers/{provider_id}")
+        update_response = client.put(
+            f"/api/v1/providers/{provider_id}", json=update_payload, headers=headers
+        )
+        list_response = client.get("/api/v1/providers", headers=headers)
+        detail_response = client.get(f"/api/v1/providers/{provider_id}", headers=headers)
 
     assert update_response.status_code == 200
     assert list_response.status_code == 200
@@ -63,8 +67,9 @@ def test_create_provider_rejects_duplicate_name() -> None:
     }
 
     with TestClient(app) as client:
-        first_response = client.post("/api/v1/providers", json=payload)
-        second_response = client.post("/api/v1/providers", json=payload)
+        headers = register_and_get_headers(client)
+        first_response = client.post("/api/v1/providers", json=payload, headers=headers)
+        second_response = client.post("/api/v1/providers", json=payload, headers=headers)
 
     assert first_response.status_code == 201
     assert second_response.status_code == 409
