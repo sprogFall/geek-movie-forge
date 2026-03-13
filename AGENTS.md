@@ -43,6 +43,8 @@
 
 当前分支尚无历史提交，建议统一采用 Conventional Commits：`feat:`、`fix:`、`refactor:`、`test:`、`docs:`。
 
+Git 推送统一使用 SSH 远端，不使用 HTTPS token。当前仓库 `origin` 应保持为 `git@github.com:sprogFall/geek-movie-forge.git`；如发现远端被改回 HTTPS，请先修正再执行 `git push`。
+
 PR 至少应包含：
 
 - 变更目的与实现摘要；
