@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -12,16 +13,21 @@ from packages.shared.contracts.providers import (
     ProviderResponse,
 )
 from packages.shared.enums.model_capability import ModelCapability
+from services.api.app.core.store import JsonFileStore
 from services.api.app.services.errors import (
     ConflictServiceError,
     NotFoundServiceError,
     ValidationServiceError,
 )
 
+_NAMESPACE = "providers"
+
 
 class InMemoryProviderService:
-    def __init__(self) -> None:
+    def __init__(self, *, store: JsonFileStore | None = None) -> None:
         self._providers: dict[str, ProviderRecord] = {}
+        self._store = store
+        self._load()
 
     def create_provider(
         self,
@@ -43,6 +49,7 @@ class InMemoryProviderService:
             updated_at=timestamp,
         )
         self._providers[provider.provider_id] = provider
+        self._persist()
         return provider.to_response()
 
     def update_provider(
@@ -72,6 +79,7 @@ class InMemoryProviderService:
             updated_at=datetime.now(UTC),
         )
         self._providers[provider_id] = updated
+        self._persist()
         return updated.to_response()
 
     def list_providers(self, owner_id: str) -> ProviderListResponse:
@@ -94,6 +102,11 @@ class InMemoryProviderService:
         if provider is None or provider.owner_id != owner_id:
             raise NotFoundServiceError("Provider not found")
         return provider
+
+    def delete_provider(self, owner_id: str, provider_id: str) -> None:
+        self.require_provider_record(owner_id, provider_id)
+        del self._providers[provider_id]
+        self._persist()
 
     def ensure_model_capability(
         self,
@@ -124,3 +137,23 @@ class InMemoryProviderService:
             if exclude_provider_id is not None and provider.provider_id == exclude_provider_id:
                 continue
             raise ConflictServiceError("Provider name already exists")
+
+    def _persist(self) -> None:
+        if self._store is None:
+            return
+        data = {k: v.model_dump(mode="json") for k, v in self._providers.items()}
+        self._store.save(_NAMESPACE, data)
+
+    def _load(self) -> None:
+        if self._store is None:
+            return
+        data = self._store.load(_NAMESPACE)
+        if data is None:
+            return
+        for key, value in data.items():
+            try:
+                self._providers[key] = ProviderRecord(**value)
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Skipping corrupt provider entry %s", key
+                )

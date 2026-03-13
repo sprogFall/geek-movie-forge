@@ -174,3 +174,24 @@ export type TaskResponse = {
 export type TaskListResponse = {
   items: TaskResponse[];
 };
+
+/* -- Call Logs -- */
+
+export type CallLogStatus = "success" | "error";
+
+export type CallLogResponse = {
+  log_id: string;
+  provider_id: string;
+  provider_name: string;
+  model: string;
+  capability: string;
+  request_body_summary: string;
+  response_status: CallLogStatus;
+  error_detail: string | null;
+  duration_ms: number;
+  created_at: string;
+};
+
+export type CallLogListResponse = {
+  items: CallLogResponse[];
+};

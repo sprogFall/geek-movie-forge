@@ -11,6 +11,8 @@ class Settings(BaseModel):
     app_env: str
     jwt_secret: str
     jwt_expire_minutes: int
+    persist_enabled: bool
+    persist_dir: str
 
     @field_validator("jwt_secret")
     @classmethod
@@ -22,9 +24,13 @@ class Settings(BaseModel):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    app_env = getenv("APP_ENV", "local")
     return Settings(
         app_name=getenv("APP_NAME", "Geek Movie Forge API"),
-        app_env=getenv("APP_ENV", "local"),
+        app_env=app_env,
         jwt_secret=getenv("JWT_SECRET", _DEFAULT_JWT_SECRET),
         jwt_expire_minutes=int(getenv("JWT_EXPIRE_MINUTES", "1440")),
+        persist_enabled=getenv("PERSIST_ENABLED", "true" if app_env == "local" else "false").lower()
+        in ("true", "1", "yes"),
+        persist_dir=getenv("PERSIST_DIR", ".data"),
     )

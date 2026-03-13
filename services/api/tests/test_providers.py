@@ -110,3 +110,77 @@ def test_provider_configuration_is_isolated_per_user() -> None:
     assert other_detail_response.status_code == 404
     assert other_update_response.status_code == 404
     assert other_create_response.status_code == 201
+
+
+def test_delete_provider_returns_204_and_removes_from_list() -> None:
+    payload = {
+        "name": "Delete Me Provider",
+        "base_url": "https://provider.example.com/v1",
+        "api_key": "super-secret-key",
+        "models": [{"model": "forge-image-v1", "capabilities": ["image"]}],
+    }
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        create_response = client.post("/api/v1/providers", json=payload, headers=headers)
+        provider_id = create_response.json()["provider_id"]
+
+        delete_response = client.delete(f"/api/v1/providers/{provider_id}", headers=headers)
+        list_response = client.get("/api/v1/providers", headers=headers)
+
+    assert delete_response.status_code == 204
+    assert list_response.json()["items"] == []
+
+
+def test_delete_nonexistent_provider_returns_404() -> None:
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        response = client.delete("/api/v1/providers/provider_nonexistent", headers=headers)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Provider not found"
+
+
+def test_delete_other_users_provider_returns_404() -> None:
+    payload = {
+        "name": "Private Provider",
+        "base_url": "https://provider.example.com/v1",
+        "api_key": "super-secret-key",
+        "models": [{"model": "forge-image-v1", "capabilities": ["image"]}],
+    }
+
+    with TestClient(app) as client:
+        owner_headers = register_and_get_headers(client, username="delete_owner")
+        other_headers = register_and_get_headers(client, username="delete_other")
+
+        create_response = client.post("/api/v1/providers", json=payload, headers=owner_headers)
+        provider_id = create_response.json()["provider_id"]
+
+        delete_response = client.delete(
+            f"/api/v1/providers/{provider_id}", headers=other_headers
+        )
+        owner_list = client.get("/api/v1/providers", headers=owner_headers)
+
+    assert delete_response.status_code == 404
+    assert len(owner_list.json()["items"]) == 1
+
+
+def test_can_recreate_provider_with_same_name_after_delete() -> None:
+    payload = {
+        "name": "Recyclable Provider",
+        "base_url": "https://provider.example.com/v1",
+        "api_key": "super-secret-key",
+        "models": [{"model": "forge-image-v1", "capabilities": ["image"]}],
+    }
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        first_create = client.post("/api/v1/providers", json=payload, headers=headers)
+        provider_id = first_create.json()["provider_id"]
+
+        client.delete(f"/api/v1/providers/{provider_id}", headers=headers)
+        second_create = client.post("/api/v1/providers", json=payload, headers=headers)
+
+    assert first_create.status_code == 201
+    assert second_create.status_code == 201
+    assert second_create.json()["provider_id"] != provider_id

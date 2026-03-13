@@ -53,6 +53,11 @@ export const navigationSections: NavSection[] = [
         label: "供应商",
         description: "管理 AI 模型供应商配置",
       },
+      {
+        href: "/call-logs",
+        label: "调用日志",
+        description: "查看 AI 供应商调用记录",
+      },
     ],
   },
   {

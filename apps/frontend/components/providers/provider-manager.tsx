@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listProviders, createProvider } from "@/lib/api";
+import {
+  listProviders,
+  createProvider,
+  updateProvider,
+  deleteProvider,
+} from "@/lib/api";
 import type { ProviderResponse, ModelCapability } from "@/types/api";
 
 type ModelRow = { model: string; capabilities: ModelCapability[]; label: string };
@@ -13,6 +18,9 @@ export function ProviderManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
+
+  /* editing state — null means "create" mode */
+  const [editingProvider, setEditingProvider] = useState<ProviderResponse | null>(null);
 
   /* form state */
   const [name, setName] = useState("");
@@ -35,6 +43,34 @@ export function ProviderManager() {
   useEffect(() => {
     load();
   }, []);
+
+  function resetForm() {
+    setName("");
+    setBaseUrl("");
+    setApiKey("");
+    setModels([{ ...emptyModel }]);
+    setEditingProvider(null);
+  }
+
+  function startEdit(p: ProviderResponse) {
+    setEditingProvider(p);
+    setName(p.name);
+    setBaseUrl(p.base_url);
+    setApiKey("");
+    setModels(
+      p.models.map((m) => ({
+        model: m.model,
+        capabilities: [...m.capabilities],
+        label: m.label ?? "",
+      }))
+    );
+    setShowForm(true);
+  }
+
+  function cancelForm() {
+    setShowForm(false);
+    resetForm();
+  }
 
   function toggleCap(idx: number, cap: ModelCapability) {
     setModels((prev) =>
@@ -65,32 +101,51 @@ export function ProviderManager() {
     setModels((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  async function handleDelete(p: ProviderResponse) {
+    if (!confirm(`确定删除供应商「${p.name}」？此操作不可恢复。`)) return;
+    setError("");
+    try {
+      await deleteProvider(p.provider_id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除供应商失败");
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError("");
     try {
-      const body = {
-        name,
-        base_url: baseUrl,
-        api_key: apiKey,
-        models: models
-          .filter((m) => m.model && m.capabilities.length > 0)
-          .map((m) => ({
-            model: m.model,
-            capabilities: m.capabilities,
-            label: m.label || null,
-          })),
-      };
-      await createProvider(body);
+      const cleanModels = models
+        .filter((m) => m.model && m.capabilities.length > 0)
+        .map((m) => ({
+          model: m.model,
+          capabilities: m.capabilities,
+          label: m.label || null,
+        }));
+
+      if (editingProvider) {
+        const body: Record<string, unknown> = {
+          name,
+          base_url: baseUrl,
+          models: cleanModels,
+        };
+        if (apiKey) body.api_key = apiKey;
+        await updateProvider(editingProvider.provider_id, body);
+      } else {
+        await createProvider({
+          name,
+          base_url: baseUrl,
+          api_key: apiKey,
+          models: cleanModels,
+        });
+      }
       setShowForm(false);
-      setName("");
-      setBaseUrl("");
-      setApiKey("");
-      setModels([{ ...emptyModel }]);
+      resetForm();
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建供应商失败");
+      setError(err instanceof Error ? err.message : "保存供应商失败");
     } finally {
       setSubmitting(false);
     }
@@ -105,6 +160,8 @@ export function ProviderManager() {
     );
   }
 
+  const isEditing = editingProvider !== null;
+
   return (
     <div className="stack-lg">
       {error && <div className="error-banner">{error}</div>}
@@ -112,7 +169,14 @@ export function ProviderManager() {
       <div className="form-actions">
         <button
           className="btn btn-primary"
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            if (showForm) {
+              cancelForm();
+            } else {
+              resetForm();
+              setShowForm(true);
+            }
+          }}
         >
           {showForm ? "取消" : "新增供应商"}
         </button>
@@ -145,14 +209,16 @@ export function ProviderManager() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">API Key</label>
+            <label className="form-label">
+              API Key{isEditing ? "（留空则不更新）" : ""}
+            </label>
             <input
               className="form-input"
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-..."
-              required
+              required={!isEditing}
             />
           </div>
 
@@ -218,7 +284,9 @@ export function ProviderManager() {
           <div className="form-actions">
             <button className="btn btn-primary" type="submit" disabled={submitting}>
               {submitting && <span className="spinner" />}
-              {submitting ? "创建中..." : "创建供应商"}
+              {submitting
+                ? isEditing ? "保存中..." : "创建中..."
+                : isEditing ? "保存修改" : "创建供应商"}
             </button>
           </div>
         </form>
@@ -254,8 +322,30 @@ export function ProviderManager() {
                   </span>
                 ))}
               </div>
-              <div style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-                创建于 {new Date(p.created_at).toLocaleDateString("zh-CN")}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+                  创建于 {new Date(p.created_at).toLocaleDateString("zh-CN")}
+                </span>
+                <span style={{ display: "flex", gap: "0.5rem" }}>
+                  <button
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => startEdit(p)}
+                  >
+                    编辑
+                  </button>
+                  <button
+                    className="btn btn-sm btn-danger"
+                    onClick={() => handleDelete(p)}
+                  >
+                    删除
+                  </button>
+                </span>
               </div>
             </article>
           ))}

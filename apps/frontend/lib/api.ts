@@ -11,6 +11,8 @@ import type {
   TaskResponse,
   MediaGenerationResponse,
   TextGenerationResponse,
+  CallLogListResponse,
+  CallLogResponse,
 } from "@/types/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -76,6 +78,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail ?? `Request failed: ${res.status}`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -121,6 +124,10 @@ export function updateProvider(id: string, body: Record<string, unknown>) {
     method: "PUT",
     body: JSON.stringify(body),
   });
+}
+
+export function deleteProvider(id: string) {
+  return request<void>(`/api/v1/providers/${id}`, { method: "DELETE" });
 }
 
 /* ── Assets ── */
@@ -197,4 +204,15 @@ export function createTask(body: Record<string, unknown>) {
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+/* -- Call Logs -- */
+
+export function listCallLogs(params?: Record<string, string>) {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return request<CallLogListResponse>(`/api/v1/call-logs${qs}`);
+}
+
+export function getCallLog(id: string) {
+  return request<CallLogResponse>(`/api/v1/call-logs/${id}`);
 }

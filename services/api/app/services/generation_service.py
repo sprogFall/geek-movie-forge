@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
+import time
 from uuid import uuid4
 
 from packages.provider_sdk.gateway import ProviderGateway
 from packages.shared.contracts.assets import AssetCreateRequest, AssetResponse
+from packages.shared.contracts.call_logs import CallLogStatus
 from packages.shared.contracts.generations import (
     ImageGenerationPayload,
     ImageGenerationRequest,
@@ -14,11 +17,13 @@ from packages.shared.contracts.generations import (
     VideoGenerationPayload,
     VideoGenerationRequest,
 )
+from packages.shared.contracts.providers import ProviderRecord
 from packages.shared.enums.asset_origin import AssetOrigin
 from packages.shared.enums.asset_type import AssetType
 from packages.shared.enums.model_capability import ModelCapability
 from services.api.app.services.asset_service import InMemoryAssetService
-from services.api.app.services.errors import ValidationServiceError
+from services.api.app.services.call_log_service import InMemoryCallLogService
+from services.api.app.services.errors import ServiceError, UpstreamServiceError, ValidationServiceError
 from services.api.app.services.provider_service import InMemoryProviderService
 
 
@@ -29,10 +34,12 @@ class GenerationService:
         provider_service: InMemoryProviderService,
         asset_service: InMemoryAssetService,
         provider_gateway: ProviderGateway,
+        call_log_service: InMemoryCallLogService | None = None,
     ) -> None:
         self._provider_service = provider_service
         self._asset_service = asset_service
         self._provider_gateway = provider_gateway
+        self._call_log_service = call_log_service
 
     async def generate_image(
         self,
@@ -54,7 +61,14 @@ class GenerationService:
             resolved_prompt=_merge_prompt(payload.preset_prompt, payload.prompt),
             options=payload.options,
         )
-        provider_result = await self._provider_gateway.generate_image(provider, gateway_payload)
+        provider_result = await self._log_and_call(
+            owner_id=owner_id,
+            provider=provider,
+            model=payload.model,
+            capability=ModelCapability.IMAGE,
+            request_summary=gateway_payload.resolved_prompt or "",
+            coro=self._provider_gateway.generate_image(provider, gateway_payload),
+        )
         saved_assets = self._save_media_assets(
             owner_id=owner_id,
             capability=ModelCapability.IMAGE,
@@ -111,7 +125,14 @@ class GenerationService:
             scene_prompt_texts=scene_prompt_texts,
             options=payload.options,
         )
-        provider_result = await self._provider_gateway.generate_video(provider, gateway_payload)
+        provider_result = await self._log_and_call(
+            owner_id=owner_id,
+            provider=provider,
+            model=payload.model,
+            capability=ModelCapability.VIDEO,
+            request_summary=gateway_payload.resolved_prompt or "",
+            coro=self._provider_gateway.generate_video(provider, gateway_payload),
+        )
         saved_assets = self._save_media_assets(
             owner_id=owner_id,
             capability=ModelCapability.VIDEO,
@@ -156,7 +177,14 @@ class GenerationService:
             resolved_prompt=resolved_prompt,
             options=payload.options,
         )
-        provider_result = await self._provider_gateway.generate_text(provider, gateway_payload)
+        provider_result = await self._log_and_call(
+            owner_id=owner_id,
+            provider=provider,
+            model=payload.model,
+            capability=ModelCapability.TEXT,
+            request_summary=resolved_prompt or payload.source_text or "",
+            coro=self._provider_gateway.generate_text(provider, gateway_payload),
+        )
         saved_assets: list[AssetResponse] = []
         if payload.save.enabled:
             saved_assets.append(
@@ -186,6 +214,58 @@ class GenerationService:
             output_text=provider_result.output_text,
             saved_assets=saved_assets,
         )
+
+    async def _log_and_call(
+        self,
+        *,
+        owner_id: str,
+        provider: ProviderRecord,
+        model: str,
+        capability: ModelCapability,
+        request_summary: str,
+        coro,
+    ):
+        logger = logging.getLogger(__name__)
+        start = time.monotonic()
+        try:
+            result = await coro
+            duration_ms = int((time.monotonic() - start) * 1000)
+            if self._call_log_service:
+                try:
+                    self._call_log_service.log_call(
+                        owner_id=owner_id,
+                        provider_id=provider.provider_id,
+                        provider_name=provider.name,
+                        model=model,
+                        capability=capability.value,
+                        request_body_summary=request_summary[:200],
+                        response_status=CallLogStatus.SUCCESS,
+                        duration_ms=duration_ms,
+                    )
+                except Exception:
+                    logger.warning("Failed to write success call log", exc_info=True)
+            return result
+        except Exception as exc:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            if self._call_log_service:
+                try:
+                    self._call_log_service.log_call(
+                        owner_id=owner_id,
+                        provider_id=provider.provider_id,
+                        provider_name=provider.name,
+                        model=model,
+                        capability=capability.value,
+                        request_body_summary=request_summary[:200],
+                        response_status=CallLogStatus.ERROR,
+                        error_detail=str(exc)[:500],
+                        duration_ms=duration_ms,
+                    )
+                except Exception:
+                    logger.warning("Failed to write error call log", exc_info=True)
+            # Re-raise ServiceError (e.g. UpstreamServiceError from gateway) as-is
+            if isinstance(exc, ServiceError):
+                raise
+            raise UpstreamServiceError(f"Provider call failed: {exc}") from exc
 
     def _resolve_image_materials(
         self,

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from packages.shared.contracts.auth import UserResponse
 from services.api.app.dependencies.auth import get_current_user
@@ -64,3 +64,13 @@ async def get_provider(
     if provider is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
     return provider
+
+
+@router.delete("/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_provider(
+    provider_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    provider_service: InMemoryProviderService = Depends(get_provider_service),
+) -> Response:
+    provider_service.delete_provider(current_user.user_id, provider_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

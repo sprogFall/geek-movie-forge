@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from packages.shared.contracts.assets import AssetCreateRequest, AssetListResponse, AssetResponse
 from packages.shared.enums.asset_origin import AssetOrigin
 from packages.shared.enums.asset_type import AssetType
+from services.api.app.core.store import JsonFileStore
 from services.api.app.services.errors import NotFoundServiceError
+
+_NAMESPACE = "assets"
 
 
 class InMemoryAssetService:
-    def __init__(self) -> None:
+    def __init__(self, *, store: JsonFileStore | None = None) -> None:
         self._assets: dict[str, AssetResponse] = {}
         self._asset_owners: dict[str, str] = {}
+        self._store = store
+        self._load()
 
     def create_asset(
         self,
@@ -39,6 +45,7 @@ class InMemoryAssetService:
         )
         self._assets[asset.asset_id] = asset
         self._asset_owners[asset.asset_id] = owner_id
+        self._persist()
         return asset
 
     def list_assets(
@@ -77,3 +84,27 @@ class InMemoryAssetService:
         if asset is None:
             raise NotFoundServiceError("Asset not found")
         return asset
+
+    def _persist(self) -> None:
+        if self._store is None:
+            return
+        data = {
+            "assets": {k: v.model_dump(mode="json") for k, v in self._assets.items()},
+            "owners": self._asset_owners,
+        }
+        self._store.save(_NAMESPACE, data)
+
+    def _load(self) -> None:
+        if self._store is None:
+            return
+        data = self._store.load(_NAMESPACE)
+        if data is None:
+            return
+        for key, value in data.get("assets", {}).items():
+            try:
+                self._assets[key] = AssetResponse(**value)
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Skipping corrupt asset entry %s", key
+                )
+        self._asset_owners = data.get("owners", {})
