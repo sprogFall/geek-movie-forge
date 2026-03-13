@@ -61,16 +61,6 @@ e2e/                   # 端到端测试目录（预留）
 scripts/               # 本地一键启动脚本
 ```
 
-### 为什么不是两个独立仓库/目录？
-
-这是一个 “前后端同仓（monorepo）” 的结构，不是“前端放在后端子目录里”。`apps/` 与 `services/` 是同级目录：
-
-- `apps/`：可部署的应用（例如 Next.js 控制台、Remotion 渲染服务）
-- `services/`：后端服务（API、编排等）
-- `packages/`：共享领域模型与适配层（contracts/enums/provider sdk 等）
-
-这种划分的好处是：前后端可以在一次提交中原子更新 API contracts 与 UI，避免接口与页面不同步；并且共享包可以被多个服务复用。
-
 ## 快速开始（推荐：Docker 一键启动）
 
 ### 前置要求
