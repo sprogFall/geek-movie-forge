@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=75.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geek-movie-forge"
+version = "0.1.0"
+description = "Geek Movie Forge backend and platform skeleton"
+readme = "架构设计_01.md"
+requires-python = ">=3.11"
+dependencies = [
+  "alembic>=1.14.0",
+  "celery[redis]>=5.4.0",
+  "fastapi>=0.115.0",
+  "httpx>=0.28.0",
+  "langgraph>=0.4.0",
+  "prometheus-client>=0.21.0",
+  "pydantic-settings>=2.7.0",
+  "psycopg[binary]>=3.2.0",
+  "python-multipart>=0.0.20",
+  "sqlalchemy>=2.0.36",
+  "structlog>=24.4.0",
+  "uvicorn[standard]>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "asgi-lifespan>=2.1.0",
+  "pyright>=1.1.390",
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.25.0",
+  "pytest-cov>=6.0.0",
+  "ruff>=0.8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["services", "workers", "packages", "e2e"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["services", "workers", "packages"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+
+[tool.setuptools.packages.find]
+include = ["services*", "workers*", "packages*"]

@@ -1,0 +1,13 @@
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.venv/
+.gh-helper-cache/
+node_modules/
+.next/
+dist/
+build/
+coverage/
+__pycache__/
+*.pyc
+.env

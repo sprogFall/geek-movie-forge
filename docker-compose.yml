@@ -1,0 +1,221 @@
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: ./infra/docker/web.Dockerfile
+    container_name: gmf_web
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - gmf_net
+
+  api:
+    build:
+      context: .
+      dockerfile: ./infra/docker/python.Dockerfile
+    container_name: gmf_api
+    command: ["uvicorn", "services.api.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - gmf_net
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: ./infra/docker/python.Dockerfile
+    container_name: gmf_orchestrator
+    command: ["python", "-m", "services.orchestrator.app.runner"]
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "services.orchestrator.app.healthcheck"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    networks:
+      - gmf_net
+
+  worker_text:
+    build:
+      context: .
+      dockerfile: ./infra/docker/python.Dockerfile
+    container_name: gmf_worker_text
+    command: ["celery", "-A", "workers.text.app.celery_app", "worker", "-Q", "queue:text", "--loglevel=INFO"]
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - gmf_net
+
+  worker_image:
+    build:
+      context: .
+      dockerfile: ./infra/docker/python.Dockerfile
+    container_name: gmf_worker_image
+    command: ["celery", "-A", "workers.image.app.celery_app", "worker", "-Q", "queue:image", "--loglevel=INFO"]
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - gmf_net
+
+  worker_voice:
+    build:
+      context: .
+      dockerfile: ./infra/docker/python.Dockerfile
+    container_name: gmf_worker_voice
+    command: ["celery", "-A", "workers.voice.app.celery_app", "worker", "-Q", "queue:voice", "--loglevel=INFO"]
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - gmf_net
+
+  worker_render:
+    build:
+      context: .
+      dockerfile: ./infra/docker/render-worker.Dockerfile
+    container_name: gmf_worker_render
+    command: ["celery", "-A", "workers.render.app.celery_app", "worker", "-Q", "queue:render", "--loglevel=INFO"]
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      remotion_renderer:
+        condition: service_healthy
+    networks:
+      - gmf_net
+
+  remotion_renderer:
+    build:
+      context: .
+      dockerfile: ./infra/docker/remotion.Dockerfile
+    container_name: gmf_remotion
+    ports:
+      - "3100:3100"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - gmf_net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: gmf_postgres
+    environment:
+      POSTGRES_DB: geek_movie_forge
+      POSTGRES_USER: geek_movie
+      POSTGRES_PASSWORD: geek_movie
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geek_movie -d geek_movie_forge"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - gmf_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: gmf_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - gmf_net
+
+  minio:
+    image: minio/minio:RELEASE.2025-02-18T16-25-55Z
+    container_name: gmf_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - gmf_net
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.11.3
+    container_name: gmf_n8n
+    profiles: ["automation"]
+    ports:
+      - "5678:5678"
+    env_file:
+      - .env
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - gmf_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  n8n_data:
+
+networks:
+  gmf_net:
+    driver: bridge

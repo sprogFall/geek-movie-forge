@@ -1,0 +1,16 @@
+{
+  "name": "geek-movie-forge",
+  "private": true,
+  "packageManager": "npm@10.9.4",
+  "workspaces": [
+    "apps/frontend",
+    "apps/remotion_renderer"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev --workspace @geek-movie-forge/frontend",
+    "build:frontend": "npm run build --workspace @geek-movie-forge/frontend",
+    "start:frontend": "npm run start --workspace @geek-movie-forge/frontend",
+    "dev:remotion": "npm run dev --workspace @geek-movie-forge/remotion-renderer",
+    "start:remotion": "npm run start --workspace @geek-movie-forge/remotion-renderer"
+  }
+}
