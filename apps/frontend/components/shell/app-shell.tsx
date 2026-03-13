@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode } from "react";
 
-import { navigationItems } from "@/lib/navigation";
+import { navigationSections } from "@/lib/navigation";
 
 type AppShellProps = {
   eyebrow: string;
@@ -23,25 +23,32 @@ export function AppShell({ eyebrow, title, description, children }: AppShellProp
           <span className="brand-orb" />
           <div className="brand-copy">
             <strong>Geek Movie Forge</strong>
-            <span>same-repo production console</span>
+            <span>production console</span>
           </div>
         </div>
 
         <nav className="nav" aria-label="Primary navigation">
-          {navigationItems.map((item) => {
-            const isActive = pathname === item.href;
+          {navigationSections.map((section, si) => (
+            <div key={si} className="nav-section">
+              {section.title && (
+                <span className="nav-section-title">{section.title}</span>
+              )}
+              {section.items.map((item) => {
+                const isActive = pathname === item.href;
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`nav-link${isActive ? " is-active" : ""}`}
-              >
-                <strong>{item.label}</strong>
-                <span>{item.description}</span>
-              </Link>
-            );
-          })}
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`nav-link${isActive ? " is-active" : ""}`}
+                  >
+                    <strong>{item.label}</strong>
+                    <span>{item.description}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <section className="sidebar-footer">
