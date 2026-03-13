@@ -1,5 +1,8 @@
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from services.api.app.core.config import get_settings
 from services.api.app.main import app
 
 
@@ -102,3 +105,13 @@ def test_register_validates_input() -> None:
             "/api/v1/auth/register", json={"username": "gooduser", "password": "12"}
         )
         assert short_pass.status_code == 422
+
+
+def test_get_settings_rejects_short_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JWT_SECRET", "too-short-secret")
+    get_settings.cache_clear()
+
+    with pytest.raises(ValidationError, match="JWT_SECRET must be at least 32 characters"):
+        get_settings()
+
+    get_settings.cache_clear()

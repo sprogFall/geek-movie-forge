@@ -109,6 +109,7 @@ class ProviderListResponse(BaseModel):
 
 class ProviderRecord(BaseModel):
     provider_id: str
+    owner_id: str
     name: str
     base_url: AnyHttpUrl
     api_key: str

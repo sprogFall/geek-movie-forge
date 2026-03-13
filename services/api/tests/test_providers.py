@@ -74,3 +74,39 @@ def test_create_provider_rejects_duplicate_name() -> None:
     assert first_response.status_code == 201
     assert second_response.status_code == 409
     assert second_response.json()["detail"] == "Provider name already exists"
+
+
+def test_provider_configuration_is_isolated_per_user() -> None:
+    payload = {
+        "name": "Shared Name Provider",
+        "base_url": "https://provider.example.com/v1",
+        "api_key": "super-secret-key",
+        "models": [{"model": "forge-image-v1", "capabilities": ["image"]}],
+    }
+
+    with TestClient(app) as client:
+        owner_headers = register_and_get_headers(client, username="provider_owner")
+        other_headers = register_and_get_headers(client, username="provider_viewer")
+
+        create_response = client.post("/api/v1/providers", json=payload, headers=owner_headers)
+        provider_id = create_response.json()["provider_id"]
+
+        other_list_response = client.get("/api/v1/providers", headers=other_headers)
+        other_detail_response = client.get(
+            f"/api/v1/providers/{provider_id}", headers=other_headers
+        )
+        other_update_response = client.put(
+            f"/api/v1/providers/{provider_id}",
+            json={"base_url": "https://provider.example.com/private"},
+            headers=other_headers,
+        )
+        other_create_response = client.post(
+            "/api/v1/providers", json=payload, headers=other_headers
+        )
+
+    assert create_response.status_code == 201
+    assert other_list_response.status_code == 200
+    assert other_list_response.json()["items"] == []
+    assert other_detail_response.status_code == 404
+    assert other_update_response.status_code == 404
+    assert other_create_response.status_code == 201

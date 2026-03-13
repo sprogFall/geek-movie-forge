@@ -68,3 +68,24 @@ def test_get_task_returns_404_for_unknown_task() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Task not found"
+
+
+def test_task_access_is_isolated_per_user() -> None:
+    payload = {
+        "project_id": "proj_003",
+        "title": "Private task",
+        "source_text": "Only owner should see this task.",
+        "platform": "douyin",
+    }
+
+    with TestClient(app) as client:
+        owner_headers = register_and_get_headers(client, username="task_owner")
+        other_headers = register_and_get_headers(client, username="task_viewer")
+        create_response = client.post("/api/v1/tasks", json=payload, headers=owner_headers)
+        task_id = create_response.json()["task_id"]
+
+        other_response = client.get(f"/api/v1/tasks/{task_id}", headers=other_headers)
+
+    assert create_response.status_code == 201
+    assert other_response.status_code == 404
+    assert other_response.json()["detail"] == "Task not found"

@@ -76,6 +76,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [loading, user, pathname, router]);
 
+  useEffect(() => {
+    if (!loading && user && PUBLIC_PATHS.includes(pathname)) {
+      router.replace("/");
+    }
+  }, [loading, user, pathname, router]);
+
   async function handleLogin(username: string, password: string) {
     const res = await apiLogin(username, password);
     storeAuth(res.access_token, res.user);

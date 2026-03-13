@@ -34,8 +34,13 @@ class GenerationService:
         self._asset_service = asset_service
         self._provider_gateway = provider_gateway
 
-    async def generate_image(self, payload: ImageGenerationRequest) -> MediaGenerationResponse:
+    async def generate_image(
+        self,
+        owner_id: str,
+        payload: ImageGenerationRequest,
+    ) -> MediaGenerationResponse:
         provider, _ = self._provider_service.ensure_model_capability(
+            owner_id,
             payload.provider_id,
             payload.model,
             ModelCapability.IMAGE,
@@ -51,6 +56,7 @@ class GenerationService:
         )
         provider_result = await self._provider_gateway.generate_image(provider, gateway_payload)
         saved_assets = self._save_media_assets(
+            owner_id=owner_id,
             capability=ModelCapability.IMAGE,
             provider_id=provider.provider_id,
             model=payload.model,
@@ -71,15 +77,26 @@ class GenerationService:
             saved_assets=saved_assets,
         )
 
-    async def generate_video(self, payload: VideoGenerationRequest) -> MediaGenerationResponse:
+    async def generate_video(
+        self,
+        owner_id: str,
+        payload: VideoGenerationRequest,
+    ) -> MediaGenerationResponse:
         provider, _ = self._provider_service.ensure_model_capability(
+            owner_id,
             payload.provider_id,
             payload.model,
             ModelCapability.VIDEO,
         )
-        image_urls, image_base64 = self._resolve_image_materials(payload.image_material_asset_ids)
+        image_urls, image_base64 = self._resolve_image_materials(
+            owner_id,
+            payload.image_material_asset_ids,
+        )
         image_urls.extend(payload.image_material_urls)
-        scene_prompt_texts = self._resolve_scene_prompt_materials(payload.scene_prompt_asset_ids)
+        scene_prompt_texts = self._resolve_scene_prompt_materials(
+            owner_id,
+            payload.scene_prompt_asset_ids,
+        )
         scene_prompt_texts.extend(payload.scene_prompt_texts)
 
         gateway_payload = VideoGenerationPayload(
@@ -96,6 +113,7 @@ class GenerationService:
         )
         provider_result = await self._provider_gateway.generate_video(provider, gateway_payload)
         saved_assets = self._save_media_assets(
+            owner_id=owner_id,
             capability=ModelCapability.VIDEO,
             provider_id=provider.provider_id,
             model=payload.model,
@@ -116,8 +134,13 @@ class GenerationService:
             saved_assets=saved_assets,
         )
 
-    async def generate_text(self, payload: TextGenerationRequest) -> TextGenerationResponse:
+    async def generate_text(
+        self,
+        owner_id: str,
+        payload: TextGenerationRequest,
+    ) -> TextGenerationResponse:
         provider, _ = self._provider_service.ensure_model_capability(
+            owner_id,
             payload.provider_id,
             payload.model,
             ModelCapability.TEXT,
@@ -138,6 +161,7 @@ class GenerationService:
         if payload.save.enabled:
             saved_assets.append(
                 self._asset_service.create_asset(
+                    owner_id,
                     AssetCreateRequest(
                         asset_type=AssetType.TEXT,
                         category=payload.save.category or AssetType.TEXT.value,
@@ -163,11 +187,15 @@ class GenerationService:
             saved_assets=saved_assets,
         )
 
-    def _resolve_image_materials(self, asset_ids: list[str]) -> tuple[list[str], list[str]]:
+    def _resolve_image_materials(
+        self,
+        owner_id: str,
+        asset_ids: list[str],
+    ) -> tuple[list[str], list[str]]:
         image_urls: list[str] = []
         image_base64: list[str] = []
         for asset_id in asset_ids:
-            asset = self._asset_service.require_asset(asset_id)
+            asset = self._asset_service.require_asset(owner_id, asset_id)
             if asset.asset_type != AssetType.IMAGE:
                 raise ValidationServiceError("Image material asset must be image type")
             if asset.content_url is not None:
@@ -179,10 +207,14 @@ class GenerationService:
             raise ValidationServiceError("Image material asset has no usable content")
         return image_urls, image_base64
 
-    def _resolve_scene_prompt_materials(self, asset_ids: list[str]) -> list[str]:
+    def _resolve_scene_prompt_materials(
+        self,
+        owner_id: str,
+        asset_ids: list[str],
+    ) -> list[str]:
         prompts: list[str] = []
         for asset_id in asset_ids:
-            asset = self._asset_service.require_asset(asset_id)
+            asset = self._asset_service.require_asset(owner_id, asset_id)
             if asset.asset_type != AssetType.TEXT:
                 raise ValidationServiceError("Scene prompt asset must be text type")
             if not asset.content_text:
@@ -193,6 +225,7 @@ class GenerationService:
     def _save_media_assets(
         self,
         *,
+        owner_id: str,
         capability: ModelCapability,
         provider_id: str,
         model: str,
@@ -212,6 +245,7 @@ class GenerationService:
                 raise ValidationServiceError("Generated output has no storable media content")
             saved_assets.append(
                 self._asset_service.create_asset(
+                    owner_id,
                     AssetCreateRequest(
                         asset_type=asset_type,
                         category=category or asset_type.value,

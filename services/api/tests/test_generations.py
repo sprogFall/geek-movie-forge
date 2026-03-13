@@ -258,3 +258,71 @@ def test_generate_rejects_model_without_required_capability() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "Model does not support image generation"
+
+
+def test_generate_rejects_provider_owned_by_other_user() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        owner_headers = register_and_get_headers(client, username="provider_owner")
+        other_headers = register_and_get_headers(client, username="generation_user")
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, owner_headers)
+
+        response = client.post(
+            "/api/v1/generations/images",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-image-v1",
+                "count": 1,
+                "prompt": "不应该访问别人的 provider",
+            },
+            headers=other_headers,
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Provider not found"
+
+
+def test_generate_rejects_asset_material_owned_by_other_user() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        owner_headers = register_and_get_headers(client, username="asset_owner")
+        other_headers = register_and_get_headers(client, username="video_user")
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, other_headers)
+
+        image_asset_response = client.post(
+            "/api/v1/assets",
+            json={
+                "asset_type": "image",
+                "category": "reference",
+                "name": "private-reference",
+                "content_url": "https://cdn.example.com/assets/private.png",
+            },
+            headers=owner_headers,
+        )
+
+        response = client.post(
+            "/api/v1/generations/videos",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "count": 1,
+                "prompt": "使用别人的素材不应成功",
+                "image_material_asset_ids": [image_asset_response.json()["asset_id"]],
+            },
+            headers=other_headers,
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Asset not found"

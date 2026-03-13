@@ -22,10 +22,10 @@ router = APIRouter(prefix="/api/v1/providers", tags=["providers"])
 )
 async def create_provider(
     payload: ProviderConfigCreateRequest,
-    _user: UserResponse = Depends(get_current_user),
+    current_user: UserResponse = Depends(get_current_user),
     provider_service: InMemoryProviderService = Depends(get_provider_service),
 ) -> ProviderResponse:
-    return provider_service.create_provider(payload)
+    return provider_service.create_provider(current_user.user_id, payload)
 
 
 @router.put(
@@ -36,18 +36,18 @@ async def create_provider(
 async def update_provider(
     provider_id: str,
     payload: ProviderConfigUpdateRequest,
-    _user: UserResponse = Depends(get_current_user),
+    current_user: UserResponse = Depends(get_current_user),
     provider_service: InMemoryProviderService = Depends(get_provider_service),
 ) -> ProviderResponse:
-    return provider_service.update_provider(provider_id, payload)
+    return provider_service.update_provider(current_user.user_id, provider_id, payload)
 
 
 @router.get("", response_model=ProviderListResponse, response_model_exclude_none=True)
 async def list_providers(
-    _user: UserResponse = Depends(get_current_user),
+    current_user: UserResponse = Depends(get_current_user),
     provider_service: InMemoryProviderService = Depends(get_provider_service),
 ) -> ProviderListResponse:
-    return provider_service.list_providers()
+    return provider_service.list_providers(current_user.user_id)
 
 
 @router.get(
@@ -57,10 +57,10 @@ async def list_providers(
 )
 async def get_provider(
     provider_id: str,
-    _user: UserResponse = Depends(get_current_user),
+    current_user: UserResponse = Depends(get_current_user),
     provider_service: InMemoryProviderService = Depends(get_provider_service),
 ) -> ProviderResponse:
-    provider = provider_service.get_provider(provider_id)
+    provider = provider_service.get_provider(current_user.user_id, provider_id)
     if provider is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
     return provider

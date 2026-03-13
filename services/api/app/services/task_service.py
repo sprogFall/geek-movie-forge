@@ -9,8 +9,9 @@ from packages.shared.enums.task_status import TaskStatus
 class InMemoryTaskService:
     def __init__(self) -> None:
         self._tasks: dict[str, TaskResponse] = {}
+        self._task_owners: dict[str, str] = {}
 
-    def create_task(self, payload: TaskCreateRequest) -> TaskResponse:
+    def create_task(self, owner_id: str, payload: TaskCreateRequest) -> TaskResponse:
         task = TaskResponse(
             task_id=f"task_{uuid4().hex[:12]}",
             project_id=payload.project_id,
@@ -20,7 +21,11 @@ class InMemoryTaskService:
             status=TaskStatus.DRAFT,
         )
         self._tasks[task.task_id] = task
+        self._task_owners[task.task_id] = owner_id
         return task
 
-    def get_task(self, task_id: str) -> TaskResponse | None:
-        return self._tasks.get(task_id)
+    def get_task(self, owner_id: str, task_id: str) -> TaskResponse | None:
+        task = self._tasks.get(task_id)
+        if task is None or self._task_owners.get(task_id) != owner_id:
+            return None
+        return task

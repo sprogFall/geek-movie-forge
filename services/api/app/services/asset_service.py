@@ -12,9 +12,11 @@ from services.api.app.services.errors import NotFoundServiceError
 class InMemoryAssetService:
     def __init__(self) -> None:
         self._assets: dict[str, AssetResponse] = {}
+        self._asset_owners: dict[str, str] = {}
 
     def create_asset(
         self,
+        owner_id: str,
         payload: AssetCreateRequest,
         *,
         origin: AssetOrigin = AssetOrigin.MANUAL,
@@ -36,17 +38,23 @@ class InMemoryAssetService:
             created_at=datetime.now(UTC),
         )
         self._assets[asset.asset_id] = asset
+        self._asset_owners[asset.asset_id] = owner_id
         return asset
 
     def list_assets(
         self,
         *,
+        owner_id: str,
         asset_type: AssetType | None = None,
         category: str | None = None,
         provider_id: str | None = None,
         origin: AssetOrigin | None = None,
     ) -> AssetListResponse:
-        items = list(self._assets.values())
+        items = [
+            asset
+            for asset_id, asset in self._assets.items()
+            if self._asset_owners.get(asset_id) == owner_id
+        ]
         if asset_type is not None:
             items = [item for item in items if item.asset_type == asset_type]
         if category is not None:
@@ -58,11 +66,14 @@ class InMemoryAssetService:
         items.sort(key=lambda item: item.created_at)
         return AssetListResponse(items=items)
 
-    def get_asset(self, asset_id: str) -> AssetResponse | None:
-        return self._assets.get(asset_id)
-
-    def require_asset(self, asset_id: str) -> AssetResponse:
+    def get_asset(self, owner_id: str, asset_id: str) -> AssetResponse | None:
         asset = self._assets.get(asset_id)
+        if asset is None or self._asset_owners.get(asset_id) != owner_id:
+            return None
+        return asset
+
+    def require_asset(self, owner_id: str, asset_id: str) -> AssetResponse:
+        asset = self.get_asset(owner_id, asset_id)
         if asset is None:
             raise NotFoundServiceError("Asset not found")
         return asset
