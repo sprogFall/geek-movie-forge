@@ -5,6 +5,10 @@ import type {
   ProviderListResponse,
   AssetListResponse,
   AssetResponse,
+  ProjectListResponse,
+  ProjectResponse,
+  TaskListResponse,
+  TaskResponse,
   MediaGenerationResponse,
   TextGenerationResponse,
 } from "@/types/api";
@@ -65,7 +69,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401) {
     clearAuth();
     onUnauthorized?.();
-    throw new Error("Session expired");
+    throw new Error("登录已过期，请重新登录");
   }
 
   if (!res.ok) {
@@ -155,6 +159,41 @@ export function generateVideos(body: Record<string, unknown>) {
 
 export function generateTexts(body: Record<string, unknown>) {
   return request<TextGenerationResponse>("/api/v1/generations/texts", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/* 鈹€鈹€ Projects 鈹€鈹€ */
+
+export function listProjects() {
+  return request<ProjectListResponse>("/api/v1/projects");
+}
+
+export function getProject(id: string) {
+  return request<ProjectResponse>(`/api/v1/projects/${id}`);
+}
+
+export function createProject(body: Record<string, unknown>) {
+  return request<ProjectResponse>("/api/v1/projects", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/* 鈹€鈹€ Tasks 鈹€鈹€ */
+
+export function listTasks(params?: Record<string, string>) {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return request<TaskListResponse>(`/api/v1/tasks${qs}`);
+}
+
+export function getTask(id: string) {
+  return request<TaskResponse>(`/api/v1/tasks/${id}`);
+}
+
+export function createTask(body: Record<string, unknown>) {
+  return request<TaskResponse>("/api/v1/tasks", {
     method: "POST",
     body: JSON.stringify(body),
   });

@@ -28,7 +28,7 @@ export function VideoGenForm() {
       setProviders(filtered);
       setLoaded(true);
     } catch {
-      setError("Failed to load providers");
+      setError("加载供应商失败");
     }
   }
 
@@ -55,12 +55,12 @@ export function VideoGenForm() {
           .filter(Boolean);
       }
       if (saveEnabled) {
-        body.save = { enabled: true, category: category || "generated", tags: [] };
+        body.save = { enabled: true, category: category || "生成", tags: [] };
       }
       const res = await generateVideos(body);
       setResult(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed");
+      setError(err instanceof Error ? err.message : "生成失败");
     } finally {
       setLoading(false);
     }
@@ -70,7 +70,7 @@ export function VideoGenForm() {
     <div className="gen-layout">
       <form className="panel form-stack" onSubmit={handleSubmit}>
         <div className="form-group">
-          <label className="form-label">Provider</label>
+          <label className="form-label">供应商</label>
           <select
             className="form-select"
             value={providerId}
@@ -81,7 +81,7 @@ export function VideoGenForm() {
             }}
             required
           >
-            <option value="">Select a provider...</option>
+            <option value="">请选择供应商...</option>
             {providers.map((p) => (
               <option key={p.provider_id} value={p.provider_id}>
                 {p.name}
@@ -91,7 +91,7 @@ export function VideoGenForm() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Model</label>
+          <label className="form-label">模型</label>
           <select
             className="form-select"
             value={model}
@@ -99,7 +99,7 @@ export function VideoGenForm() {
             required
             disabled={!providerId}
           >
-            <option value="">Select a model...</option>
+            <option value="">请选择模型...</option>
             {videoModels.map((m) => (
               <option key={m.model} value={m.model}>
                 {m.label ?? m.model}
@@ -109,20 +109,20 @@ export function VideoGenForm() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Prompt</label>
+          <label className="form-label">提示词</label>
           <textarea
             className="form-textarea"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe the video you want to generate..."
+            placeholder="描述你想生成的视频..."
             rows={4}
             required
           />
         </div>
 
         <div className="form-group">
-          <label className="form-label">Reference image URLs</label>
-          <span className="form-hint">One URL per line (optional)</span>
+          <label className="form-label">参考图片 URL</label>
+          <span className="form-hint">每行一个 URL（可选）</span>
           <textarea
             className="form-textarea"
             value={imageMaterialUrls}
@@ -134,7 +134,7 @@ export function VideoGenForm() {
 
         <div className="form-row">
           <div className="form-group">
-            <label className="form-label">Count</label>
+            <label className="form-label">数量</label>
             <input
               className="form-input"
               type="number"
@@ -145,13 +145,13 @@ export function VideoGenForm() {
             />
           </div>
           <div className="form-group">
-            <label className="form-label">Category</label>
+            <label className="form-label">分类</label>
             <input
               className="form-input"
               type="text"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              placeholder="e.g. scene-clip"
+              placeholder="例如：场景片段"
             />
           </div>
         </div>
@@ -164,14 +164,14 @@ export function VideoGenForm() {
             onChange={(e) => setSaveEnabled(e.target.checked)}
           />
           <label htmlFor="save-video" className="form-label">
-            Save to asset library
+            保存到素材库
           </label>
         </div>
 
         <div className="form-actions">
           <button className="btn btn-primary" type="submit" disabled={loading}>
             {loading && <span className="spinner" />}
-            {loading ? "Generating..." : "Generate videos"}
+            {loading ? "生成中..." : "生成视频"}
           </button>
         </div>
       </form>
@@ -182,7 +182,7 @@ export function VideoGenForm() {
         {result && (
           <>
             <div className="info-banner">
-              Generated {result.outputs.length} video(s) &middot; {result.resolved_prompt.slice(0, 80)}
+              已生成 {result.outputs.length} 段视频 &middot; {result.resolved_prompt.slice(0, 80)}
               {result.resolved_prompt.length > 80 ? "..." : ""}
             </div>
             <div className="gen-output-grid">
@@ -193,7 +193,7 @@ export function VideoGenForm() {
                   )}
                   <div className="gen-output-meta">
                     <small>
-                      Video {output.index + 1}
+                      视频 {output.index + 1}
                       {output.duration_seconds != null &&
                         ` \u00B7 ${output.duration_seconds.toFixed(1)}s`}
                     </small>
@@ -211,7 +211,7 @@ export function VideoGenForm() {
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
             </div>
-            <p>Generated videos will appear here</p>
+            <p>生成结果会显示在这里</p>
           </div>
         )}
       </div>

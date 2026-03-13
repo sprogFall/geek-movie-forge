@@ -101,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       <div className="loading-screen">
         <div className="loading-panel">
           <span className="loading-dot" />
-          <span>Loading...</span>
+          <span>加载中...</span>
         </div>
       </div>
     );

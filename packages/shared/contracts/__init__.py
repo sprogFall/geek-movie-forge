@@ -17,7 +17,12 @@ from packages.shared.contracts.providers import (
     ProviderResponse,
 )
 from packages.shared.contracts.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
-from packages.shared.contracts.tasks import TaskCreateRequest, TaskResponse
+from packages.shared.contracts.projects import (
+    ProjectCreateRequest,
+    ProjectListResponse,
+    ProjectResponse,
+)
+from packages.shared.contracts.tasks import TaskCreateRequest, TaskListResponse, TaskResponse
 
 __all__ = [
     "LoginRequest",
@@ -35,7 +40,11 @@ __all__ = [
     "ProviderMediaGenerationResult",
     "ProviderResponse",
     "ProviderTextGenerationResult",
+    "ProjectCreateRequest",
+    "ProjectListResponse",
+    "ProjectResponse",
     "TaskCreateRequest",
+    "TaskListResponse",
     "TaskResponse",
     "TextGenerationRequest",
     "TextGenerationResponse",

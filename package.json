@@ -12,5 +12,8 @@
     "start:frontend": "npm run start --workspace @geek-movie-forge/frontend",
     "dev:remotion": "npm run dev --workspace @geek-movie-forge/remotion-renderer",
     "start:remotion": "npm run start --workspace @geek-movie-forge/remotion-renderer"
+  },
+  "dependencies": {
+    "codex": "^0.2.3"
   }
 }

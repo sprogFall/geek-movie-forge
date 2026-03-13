@@ -28,7 +28,7 @@ export function TextGenForm() {
       setProviders(filtered);
       setLoaded(true);
     } catch {
-      setError("Failed to load providers");
+      setError("加载供应商失败");
     }
   }
 
@@ -52,12 +52,12 @@ export function TextGenForm() {
         body.prompt = prompt;
       }
       if (saveEnabled) {
-        body.save = { enabled: true, category: category || "text-output", tags: [] };
+        body.save = { enabled: true, category: category || "文本输出", tags: [] };
       }
       const res = await generateTexts(body);
       setResult(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed");
+      setError(err instanceof Error ? err.message : "生成失败");
     } finally {
       setLoading(false);
     }
@@ -67,7 +67,7 @@ export function TextGenForm() {
     <div className="gen-layout">
       <form className="panel form-stack" onSubmit={handleSubmit}>
         <div className="form-group">
-          <label className="form-label">Provider</label>
+          <label className="form-label">供应商</label>
           <select
             className="form-select"
             value={providerId}
@@ -78,7 +78,7 @@ export function TextGenForm() {
             }}
             required
           >
-            <option value="">Select a provider...</option>
+            <option value="">请选择供应商...</option>
             {providers.map((p) => (
               <option key={p.provider_id} value={p.provider_id}>
                 {p.name}
@@ -89,7 +89,7 @@ export function TextGenForm() {
 
         <div className="form-row">
           <div className="form-group">
-            <label className="form-label">Model</label>
+            <label className="form-label">模型</label>
             <select
               className="form-select"
               value={model}
@@ -97,7 +97,7 @@ export function TextGenForm() {
               required
               disabled={!providerId}
             >
-              <option value="">Select a model...</option>
+              <option value="">请选择模型...</option>
               {textModels.map((m) => (
                 <option key={m.model} value={m.model}>
                   {m.label ?? m.model}
@@ -106,41 +106,41 @@ export function TextGenForm() {
             </select>
           </div>
           <div className="form-group">
-            <label className="form-label">Task type</label>
+            <label className="form-label">任务类型</label>
             <select
               className="form-select"
               value={taskType}
               onChange={(e) => setTaskType(e.target.value)}
             >
-              <option value="script">Script writing</option>
-              <option value="caption">Caption</option>
-              <option value="copy">Copywriting</option>
-              <option value="summary">Summary</option>
-              <option value="translate">Translation</option>
+              <option value="script">脚本写作</option>
+              <option value="caption">字幕</option>
+              <option value="copy">文案</option>
+              <option value="summary">摘要</option>
+              <option value="translate">翻译</option>
             </select>
           </div>
         </div>
 
         <div className="form-group">
-          <label className="form-label">Source text</label>
+          <label className="form-label">源文本</label>
           <textarea
             className="form-textarea"
             value={sourceText}
             onChange={(e) => setSourceText(e.target.value)}
-            placeholder="Paste or type your source material here..."
+            placeholder="在这里粘贴或输入素材内容..."
             rows={5}
             required
           />
         </div>
 
         <div className="form-group">
-          <label className="form-label">Additional prompt</label>
-          <span className="form-hint">Optional instructions to guide the generation</span>
+          <label className="form-label">附加提示</label>
+          <span className="form-hint">可选，用于补充约束或风格要求</span>
           <textarea
             className="form-textarea"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. Keep it under 200 words, use a conversational tone..."
+            placeholder="例如：控制在 200 字以内，口语化风格..."
             rows={3}
           />
         </div>
@@ -153,14 +153,14 @@ export function TextGenForm() {
             onChange={(e) => setSaveEnabled(e.target.checked)}
           />
           <label htmlFor="save-text" className="form-label">
-            Save to asset library
+            保存到素材库
           </label>
         </div>
 
         <div className="form-actions">
           <button className="btn btn-primary" type="submit" disabled={loading}>
             {loading && <span className="spinner" />}
-            {loading ? "Generating..." : "Generate text"}
+            {loading ? "生成中..." : "生成文本"}
           </button>
         </div>
       </form>
@@ -171,7 +171,7 @@ export function TextGenForm() {
         {result && (
           <>
             <div className="info-banner">
-              Text generated &middot; {result.task_type} &middot; model: {result.model}
+              已生成文本 &middot; 类型：{result.task_type} &middot; 模型：{result.model}
             </div>
             <div className="gen-text-output">{result.output_text}</div>
           </>
@@ -188,7 +188,7 @@ export function TextGenForm() {
                 <path d="M10 9H8" />
               </svg>
             </div>
-            <p>Generated text will appear here</p>
+            <p>生成结果会显示在这里</p>
           </div>
         )}
       </div>

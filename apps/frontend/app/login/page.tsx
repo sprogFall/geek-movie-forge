@@ -18,7 +18,7 @@ export default function LoginPage() {
     try {
       await login(username, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "登录失败");
     } finally {
       setLoading(false);
     }
@@ -32,11 +32,11 @@ export default function LoginPage() {
             <span className="brand-orb" />
             <div className="brand-copy">
               <strong>Geek Movie Forge</strong>
-              <span>production console</span>
+              <span>制作控制台</span>
             </div>
           </div>
-          <h1>Sign in</h1>
-          <p>Enter your credentials to access the console.</p>
+          <h1>登录</h1>
+          <p>请输入账号密码以进入控制台。</p>
         </div>
 
         {error && <div className="error-banner">{error}</div>}
@@ -44,7 +44,7 @@ export default function LoginPage() {
         <div className="form-stack">
           <div className="form-group">
             <label className="form-label" htmlFor="username">
-              Username
+              用户名
             </label>
             <input
               id="username"
@@ -52,7 +52,7 @@ export default function LoginPage() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="Enter username"
+              placeholder="请输入用户名"
               autoComplete="username"
               required
             />
@@ -60,7 +60,7 @@ export default function LoginPage() {
 
           <div className="form-group">
             <label className="form-label" htmlFor="password">
-              Password
+              密码
             </label>
             <input
               id="password"
@@ -68,7 +68,7 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
+              placeholder="请输入密码"
               autoComplete="current-password"
               required
             />
@@ -76,14 +76,14 @@ export default function LoginPage() {
 
           <button className="btn btn-primary auth-btn" type="submit" disabled={loading}>
             {loading && <span className="spinner" />}
-            {loading ? "Signing in..." : "Sign in"}
+            {loading ? "正在登录..." : "登录"}
           </button>
         </div>
 
         <p className="auth-footer">
-          Don&apos;t have an account?{" "}
+          还没有账号？{" "}
           <Link href="/register" className="auth-link">
-            Create one
+            去注册
           </Link>
         </p>
       </form>

@@ -15,7 +15,7 @@ export default function RegisterPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError("两次输入的密码不一致");
       return;
     }
     setLoading(true);
@@ -23,7 +23,7 @@ export default function RegisterPage() {
     try {
       await register(username, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed");
+      setError(err instanceof Error ? err.message : "注册失败");
     } finally {
       setLoading(false);
     }
@@ -37,11 +37,11 @@ export default function RegisterPage() {
             <span className="brand-orb" />
             <div className="brand-copy">
               <strong>Geek Movie Forge</strong>
-              <span>production console</span>
+              <span>制作控制台</span>
             </div>
           </div>
-          <h1>Create account</h1>
-          <p>Register to start using the production console.</p>
+          <h1>注册</h1>
+          <p>创建账号后即可使用制作控制台。</p>
         </div>
 
         {error && <div className="error-banner">{error}</div>}
@@ -49,7 +49,7 @@ export default function RegisterPage() {
         <div className="form-stack">
           <div className="form-group">
             <label className="form-label" htmlFor="username">
-              Username
+              用户名
             </label>
             <input
               id="username"
@@ -57,7 +57,7 @@ export default function RegisterPage() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="At least 2 characters"
+              placeholder="至少 2 个字符"
               autoComplete="username"
               required
               minLength={2}
@@ -66,7 +66,7 @@ export default function RegisterPage() {
 
           <div className="form-group">
             <label className="form-label" htmlFor="password">
-              Password
+              密码
             </label>
             <input
               id="password"
@@ -74,7 +74,7 @@ export default function RegisterPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 6 characters"
+              placeholder="至少 6 个字符"
               autoComplete="new-password"
               required
               minLength={6}
@@ -83,7 +83,7 @@ export default function RegisterPage() {
 
           <div className="form-group">
             <label className="form-label" htmlFor="confirm-password">
-              Confirm password
+              确认密码
             </label>
             <input
               id="confirm-password"
@@ -91,7 +91,7 @@ export default function RegisterPage() {
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Re-enter password"
+              placeholder="请再次输入密码"
               autoComplete="new-password"
               required
               minLength={6}
@@ -100,14 +100,14 @@ export default function RegisterPage() {
 
           <button className="btn btn-primary auth-btn" type="submit" disabled={loading}>
             {loading && <span className="spinner" />}
-            {loading ? "Creating account..." : "Create account"}
+            {loading ? "正在创建账号..." : "创建账号"}
           </button>
         </div>
 
         <p className="auth-footer">
-          Already have an account?{" "}
+          已有账号？{" "}
           <Link href="/login" className="auth-link">
-            Sign in
+            去登录
           </Link>
         </p>
       </form>

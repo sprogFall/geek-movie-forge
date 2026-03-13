@@ -124,3 +124,53 @@ export type AssetSaveOptions = {
   name_prefix?: string;
   tags?: string[];
 };
+
+/* 鈹€鈹€ Projects 鈹€鈹€ */
+
+export type ProjectStatus = "draft" | "active" | "review" | "completed" | "archived";
+
+export type ProjectCreateRequest = {
+  title: string;
+  summary: string;
+  platform: string;
+  aspect_ratio: string;
+  status?: ProjectStatus;
+};
+
+export type ProjectResponse = {
+  project_id: string;
+  title: string;
+  summary: string;
+  platform: string;
+  aspect_ratio: string;
+  status: ProjectStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectListResponse = {
+  items: ProjectResponse[];
+};
+
+/* 鈹€鈹€ Tasks 鈹€鈹€ */
+
+export type TaskCreateRequest = {
+  project_id: string;
+  title: string;
+  source_text: string;
+  platform: string;
+};
+
+export type TaskResponse = {
+  task_id: string;
+  project_id: string;
+  title: string;
+  source_text: string;
+  platform: string;
+  status: TaskStatus;
+  created_at: string;
+};
+
+export type TaskListResponse = {
+  items: TaskResponse[];
+};

@@ -1,12 +1,16 @@
 import { StatusPill } from "@/components/ui/status-pill";
-import { ProjectSummary } from "@/types/console";
+import type { ProjectResponse } from "@/types/api";
 
 type ProjectCardProps = {
-  project: ProjectSummary;
+  project: ProjectResponse;
   compact?: boolean;
 };
 
 export function ProjectCard({ project, compact = false }: ProjectCardProps) {
+  const updatedAtLabel = project.updated_at
+    ? new Date(project.updated_at).toLocaleString("zh-CN")
+    : "";
+
   return (
     <article className="project-card">
       <div className="project-card-header">
@@ -18,15 +22,14 @@ export function ProjectCard({ project, compact = false }: ProjectCardProps) {
       </div>
 
       <div className="meta-row">
-        <span className="meta-pill">{project.platform}</span>
-        <span className="meta-pill">{project.aspectRatio}</span>
-        <span className="meta-pill">{project.lastTouched}</span>
+        <span className="meta-pill">平台：{project.platform}</span>
+        <span className="meta-pill">比例：{project.aspect_ratio}</span>
+        {updatedAtLabel ? <span className="meta-pill">更新：{updatedAtLabel}</span> : null}
       </div>
 
       {!compact ? (
         <div className="meta-row">
-          <span className="meta-pill">{project.owner}</span>
-          <span className="meta-pill">{project.revisionLabel}</span>
+          <span className="meta-pill">项目ID：{project.project_id}</span>
         </div>
       ) : null}
     </article>

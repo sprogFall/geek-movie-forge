@@ -15,58 +15,58 @@ export const navigationSections: NavSection[] = [
     items: [
       {
         href: "/",
-        label: "Overview",
-        description: "Pipeline summary and active pressure",
+        label: "总览",
+        description: "流水线概览与当前重点",
       },
     ],
   },
   {
-    title: "Generation",
+    title: "生成",
     items: [
       {
         href: "/generations/images",
-        label: "Image",
-        description: "Generate images from prompts",
+        label: "图片",
+        description: "根据提示词生成图片",
       },
       {
         href: "/generations/videos",
-        label: "Video",
-        description: "Generate videos from prompts and images",
+        label: "视频",
+        description: "根据提示词与参考图生成视频",
       },
       {
         href: "/generations/texts",
-        label: "Text",
-        description: "Scripts, captions and copywriting",
+        label: "文本",
+        description: "脚本、字幕与文案生成",
       },
     ],
   },
   {
-    title: "Library",
+    title: "资源库",
     items: [
       {
         href: "/assets",
-        label: "Assets",
-        description: "Browse generated and uploaded media",
+        label: "素材",
+        description: "浏览生成/上传的媒体素材",
       },
       {
         href: "/providers",
-        label: "Providers",
-        description: "Manage AI model providers",
+        label: "供应商",
+        description: "管理 AI 模型供应商配置",
       },
     ],
   },
   {
-    title: "Pipeline",
+    title: "流水线",
     items: [
       {
         href: "/projects",
-        label: "Projects",
-        description: "Story packages and revision states",
+        label: "项目",
+        description: "故事包与版本进度",
       },
       {
         href: "/tasks",
-        label: "Tasks",
-        description: "Queue activity across workers",
+        label: "任务",
+        description: "查看任务执行情况",
       },
     ],
   },

@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from packages.shared.contracts.auth import UserResponse
+from packages.shared.enums.task_status import TaskStatus
 from services.api.app.dependencies.auth import get_current_user
 from services.api.app.dependencies.services import get_task_service
-from services.api.app.schemas.tasks import TaskCreateRequest, TaskResponse
+from services.api.app.schemas.tasks import TaskCreateRequest, TaskListResponse, TaskResponse
 from services.api.app.services.task_service import InMemoryTaskService
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
@@ -16,6 +17,20 @@ async def create_task(
     task_service: InMemoryTaskService = Depends(get_task_service),
 ) -> TaskResponse:
     return task_service.create_task(current_user.user_id, payload)
+
+
+@router.get("", response_model=TaskListResponse)
+async def list_tasks(
+    project_id: str | None = None,
+    status: TaskStatus | None = None,
+    current_user: UserResponse = Depends(get_current_user),
+    task_service: InMemoryTaskService = Depends(get_task_service),
+) -> TaskListResponse:
+    return task_service.list_tasks(
+        owner_id=current_user.user_id,
+        project_id=project_id,
+        status=status,
+    )
 
 
 @router.get("/{task_id}", response_model=TaskResponse)

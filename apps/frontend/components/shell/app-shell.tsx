@@ -25,7 +25,7 @@ export function AppShell({ eyebrow, title, description, children }: AppShellProp
           <span className="brand-orb" />
           <div className="brand-copy">
             <strong>Geek Movie Forge</strong>
-            <span>production console</span>
+            <span>制作控制台</span>
           </div>
         </div>
 
@@ -58,11 +58,11 @@ export function AppShell({ eyebrow, title, description, children }: AppShellProp
             <div className="user-avatar">{user?.username.charAt(0).toUpperCase()}</div>
             <div>
               <strong>{user?.username}</strong>
-              <span>Authenticated</span>
+              <span>已登录</span>
             </div>
           </div>
           <button className="btn btn-sm btn-secondary" onClick={logout} type="button">
-            Sign out
+            退出登录
           </button>
         </section>
       </aside>
@@ -78,8 +78,8 @@ export function AppShell({ eyebrow, title, description, children }: AppShellProp
           <div className="topbar-status">
             <span className="status-dot" />
             <div>
-              <strong>Pipeline heartbeat</strong>
-              <div>API green, queue wiring ready</div>
+              <strong>流水线状态</strong>
+              <div>API 正常，队列链路就绪</div>
             </div>
           </div>
         </header>

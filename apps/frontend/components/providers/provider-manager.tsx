@@ -26,7 +26,7 @@ export function ProviderManager() {
       const data = await listProviders();
       setProviders(data.items);
     } catch {
-      setError("Failed to load providers");
+      setError("加载供应商失败");
     } finally {
       setLoading(false);
     }
@@ -90,7 +90,7 @@ export function ProviderManager() {
       setModels([{ ...emptyModel }]);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create provider");
+      setError(err instanceof Error ? err.message : "创建供应商失败");
     } finally {
       setSubmitting(false);
     }
@@ -100,7 +100,7 @@ export function ProviderManager() {
     return (
       <div className="gen-empty">
         <span className="spinner spinner-dark" />
-        <p>Loading providers...</p>
+        <p>正在加载供应商...</p>
       </div>
     );
   }
@@ -114,7 +114,7 @@ export function ProviderManager() {
           className="btn btn-primary"
           onClick={() => setShowForm(!showForm)}
         >
-          {showForm ? "Cancel" : "Add provider"}
+          {showForm ? "取消" : "新增供应商"}
         </button>
       </div>
 
@@ -122,17 +122,17 @@ export function ProviderManager() {
         <form className="panel form-stack" onSubmit={handleSubmit}>
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Name</label>
+              <label className="form-label">名称</label>
               <input
                 className="form-input"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. openai-main"
+                placeholder="例如：openai-main"
                 required
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Base URL</label>
+              <label className="form-label">接口地址</label>
               <input
                 className="form-input"
                 type="url"
@@ -157,7 +157,7 @@ export function ProviderManager() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Models</label>
+            <label className="form-label">模型</label>
             <div className="stack-sm">
               {models.map((m, idx) => (
                 <div key={idx} className="form-row" style={{ alignItems: "end" }}>
@@ -166,7 +166,7 @@ export function ProviderManager() {
                       className="form-input"
                       value={m.model}
                       onChange={(e) => updateModel(idx, "model", e.target.value)}
-                      placeholder="model-id"
+                      placeholder="模型ID"
                     />
                   </div>
                   <div className="form-group">
@@ -174,7 +174,7 @@ export function ProviderManager() {
                       className="form-input"
                       value={m.label}
                       onChange={(e) => updateModel(idx, "label", e.target.value)}
-                      placeholder="Display label (optional)"
+                      placeholder="展示名称（可选）"
                     />
                   </div>
                   <div className="model-list">
@@ -190,7 +190,7 @@ export function ProviderManager() {
                         }}
                       >
                         <span className={`cap-dot cap-${cap}`} />
-                        {cap}
+                        {{ text: "文本", image: "图片", video: "视频" }[cap] ?? cap}
                       </button>
                     ))}
                   </div>
@@ -200,7 +200,7 @@ export function ProviderManager() {
                       className="btn btn-sm btn-danger"
                       onClick={() => removeModelRow(idx)}
                     >
-                      Remove
+                      删除
                     </button>
                   )}
                 </div>
@@ -210,7 +210,7 @@ export function ProviderManager() {
                 className="btn btn-sm btn-secondary"
                 onClick={addModelRow}
               >
-                + Add model
+                + 添加模型
               </button>
             </div>
           </div>
@@ -218,7 +218,7 @@ export function ProviderManager() {
           <div className="form-actions">
             <button className="btn btn-primary" type="submit" disabled={submitting}>
               {submitting && <span className="spinner" />}
-              {submitting ? "Creating..." : "Create provider"}
+              {submitting ? "创建中..." : "创建供应商"}
             </button>
           </div>
         </form>
@@ -233,7 +233,7 @@ export function ProviderManager() {
               <path d="M2 12l10 5 10-5" />
             </svg>
           </div>
-          <p>No providers configured yet</p>
+          <p>还没有配置供应商</p>
         </div>
       ) : (
         <div className="provider-grid">
@@ -255,7 +255,7 @@ export function ProviderManager() {
                 ))}
               </div>
               <div style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-                Created {new Date(p.created_at).toLocaleDateString()}
+                创建于 {new Date(p.created_at).toLocaleDateString("zh-CN")}
               </div>
             </article>
           ))}

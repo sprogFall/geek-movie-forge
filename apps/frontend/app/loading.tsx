@@ -3,7 +3,7 @@ export default function Loading() {
     <main className="loading-screen">
       <div className="loading-panel">
         <span className="loading-dot" />
-        <p>Loading production console...</p>
+        <p>正在加载控制台...</p>
       </div>
     </main>
   );

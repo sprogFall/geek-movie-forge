@@ -27,7 +27,7 @@ export function ImageGenForm() {
       setProviders(filtered);
       setLoaded(true);
     } catch {
-      setError("Failed to load providers");
+      setError("加载供应商失败");
     }
   }
 
@@ -48,12 +48,12 @@ export function ImageGenForm() {
         count,
       };
       if (saveEnabled) {
-        body.save = { enabled: true, category: category || "generated", tags: [] };
+        body.save = { enabled: true, category: category || "生成", tags: [] };
       }
       const res = await generateImages(body);
       setResult(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed");
+      setError(err instanceof Error ? err.message : "生成失败");
     } finally {
       setLoading(false);
     }
@@ -63,7 +63,7 @@ export function ImageGenForm() {
     <div className="gen-layout">
       <form className="panel form-stack" onSubmit={handleSubmit}>
         <div className="form-group">
-          <label className="form-label">Provider</label>
+          <label className="form-label">供应商</label>
           <select
             className="form-select"
             value={providerId}
@@ -74,7 +74,7 @@ export function ImageGenForm() {
             }}
             required
           >
-            <option value="">Select a provider...</option>
+            <option value="">请选择供应商...</option>
             {providers.map((p) => (
               <option key={p.provider_id} value={p.provider_id}>
                 {p.name}
@@ -84,7 +84,7 @@ export function ImageGenForm() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Model</label>
+          <label className="form-label">模型</label>
           <select
             className="form-select"
             value={model}
@@ -92,7 +92,7 @@ export function ImageGenForm() {
             required
             disabled={!providerId}
           >
-            <option value="">Select a model...</option>
+            <option value="">请选择模型...</option>
             {imageModels.map((m) => (
               <option key={m.model} value={m.model}>
                 {m.label ?? m.model}
@@ -102,12 +102,12 @@ export function ImageGenForm() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Prompt</label>
+          <label className="form-label">提示词</label>
           <textarea
             className="form-textarea"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe the image you want to generate..."
+            placeholder="描述你想生成的图片..."
             rows={4}
             required
           />
@@ -115,7 +115,7 @@ export function ImageGenForm() {
 
         <div className="form-row">
           <div className="form-group">
-            <label className="form-label">Count</label>
+            <label className="form-label">数量</label>
             <input
               className="form-input"
               type="number"
@@ -126,13 +126,13 @@ export function ImageGenForm() {
             />
           </div>
           <div className="form-group">
-            <label className="form-label">Category</label>
+            <label className="form-label">分类</label>
             <input
               className="form-input"
               type="text"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              placeholder="e.g. storyboard"
+              placeholder="例如：分镜"
             />
           </div>
         </div>
@@ -145,14 +145,14 @@ export function ImageGenForm() {
             onChange={(e) => setSaveEnabled(e.target.checked)}
           />
           <label htmlFor="save-image" className="form-label">
-            Save to asset library
+            保存到素材库
           </label>
         </div>
 
         <div className="form-actions">
           <button className="btn btn-primary" type="submit" disabled={loading}>
             {loading && <span className="spinner" />}
-            {loading ? "Generating..." : "Generate images"}
+            {loading ? "生成中..." : "生成图片"}
           </button>
         </div>
       </form>
@@ -163,23 +163,23 @@ export function ImageGenForm() {
         {result && (
           <>
             <div className="info-banner">
-              Generated {result.outputs.length} image(s) &middot; {result.resolved_prompt.slice(0, 80)}
+              已生成 {result.outputs.length} 张图片 &middot; {result.resolved_prompt.slice(0, 80)}
               {result.resolved_prompt.length > 80 ? "..." : ""}
             </div>
             <div className="gen-output-grid">
               {result.outputs.map((output) => (
                 <div key={output.index} className="gen-output-card">
                   {output.url && (
-                    <img src={output.url} alt={`Generated image ${output.index + 1}`} />
+                    <img src={output.url} alt={`生成图片 ${output.index + 1}`} />
                   )}
                   {output.base64_data && (
                     <img
                       src={`data:${output.mime_type ?? "image/png"};base64,${output.base64_data}`}
-                      alt={`Generated image ${output.index + 1}`}
+                      alt={`生成图片 ${output.index + 1}`}
                     />
                   )}
                   <div className="gen-output-meta">
-                    <small>Image {output.index + 1}</small>
+                    <small>图片 {output.index + 1}</small>
                   </div>
                 </div>
               ))}
@@ -196,7 +196,7 @@ export function ImageGenForm() {
                 <path d="M21 15l-5-5L5 21" />
               </svg>
             </div>
-            <p>Generated images will appear here</p>
+            <p>生成结果会显示在这里</p>
           </div>
         )}
       </div>

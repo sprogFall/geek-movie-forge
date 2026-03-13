@@ -21,7 +21,7 @@ export function AssetBrowser() {
       const data = await listAssets(params);
       setAssets(data.items);
     } catch {
-      setError("Failed to load assets");
+      setError("加载素材失败");
     } finally {
       setLoading(false);
     }
@@ -74,6 +74,16 @@ export function AssetBrowser() {
     );
   }
 
+  const typeLabels: Record<AssetType, string> = {
+    image: "图片",
+    video: "视频",
+    text: "文本",
+  };
+  const originLabels: Record<AssetOrigin, string> = {
+    generated: "生成",
+    manual: "手动",
+  };
+
   return (
     <div className="stack-lg">
       {error && <div className="error-banner">{error}</div>}
@@ -84,29 +94,29 @@ export function AssetBrowser() {
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as AssetType | "")}
         >
-          <option value="">All types</option>
-          <option value="image">Image</option>
-          <option value="video">Video</option>
-          <option value="text">Text</option>
+          <option value="">全部类型</option>
+          <option value="image">图片</option>
+          <option value="video">视频</option>
+          <option value="text">文本</option>
         </select>
         <select
           className="form-select"
           value={originFilter}
           onChange={(e) => setOriginFilter(e.target.value as AssetOrigin | "")}
         >
-          <option value="">All origins</option>
-          <option value="generated">Generated</option>
-          <option value="manual">Manual</option>
+          <option value="">全部来源</option>
+          <option value="generated">生成</option>
+          <option value="manual">手动上传</option>
         </select>
         <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "0.88rem" }}>
-          {assets.length} asset{assets.length !== 1 ? "s" : ""}
+          共 {assets.length} 个素材
         </span>
       </div>
 
       {loading ? (
         <div className="gen-empty">
           <span className="spinner spinner-dark" />
-          <p>Loading assets...</p>
+          <p>正在加载素材...</p>
         </div>
       ) : assets.length === 0 ? (
         <div className="gen-empty">
@@ -115,7 +125,7 @@ export function AssetBrowser() {
               <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
             </svg>
           </div>
-          <p>No assets found</p>
+          <p>未找到素材</p>
         </div>
       ) : (
         <div className="asset-gallery">
@@ -125,8 +135,8 @@ export function AssetBrowser() {
               <div className="asset-info">
                 <h4>{asset.name}</h4>
                 <div className="asset-info-meta">
-                  <span className="tag-pill">{asset.asset_type}</span>
-                  <span className="tag-pill">{asset.origin}</span>
+                  <span className="tag-pill">{typeLabels[asset.asset_type]}</span>
+                  <span className="tag-pill">{originLabels[asset.origin]}</span>
                   {asset.category && <span className="tag-pill">{asset.category}</span>}
                 </div>
               </div>

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from packages.shared.enums.task_status import TaskStatus
@@ -19,3 +21,8 @@ class TaskResponse(BaseModel):
     source_text: str
     platform: str
     status: TaskStatus
+    created_at: datetime
+
+
+class TaskListResponse(BaseModel):
+    items: list[TaskResponse]

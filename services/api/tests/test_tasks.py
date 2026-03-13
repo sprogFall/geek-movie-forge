@@ -89,3 +89,66 @@ def test_task_access_is_isolated_per_user() -> None:
     assert create_response.status_code == 201
     assert other_response.status_code == 404
     assert other_response.json()["detail"] == "Task not found"
+
+
+def test_list_tasks_returns_tasks_for_current_user_only() -> None:
+    payload_owner = {
+        "project_id": "proj_owner",
+        "title": "Owner task",
+        "source_text": "Owner source text",
+        "platform": "douyin",
+    }
+    payload_other = {
+        "project_id": "proj_other",
+        "title": "Other task",
+        "source_text": "Other source text",
+        "platform": "douyin",
+    }
+
+    with TestClient(app) as client:
+        owner_headers = register_and_get_headers(client, username="task_list_owner")
+        other_headers = register_and_get_headers(client, username="task_list_other")
+        client.post("/api/v1/tasks", json=payload_owner, headers=owner_headers)
+        client.post("/api/v1/tasks", json=payload_other, headers=other_headers)
+
+        response = client.get("/api/v1/tasks", headers=owner_headers)
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["title"] == payload_owner["title"]
+
+
+def test_list_tasks_supports_filtering_by_project_id() -> None:
+    payload_a = {
+        "project_id": "proj_a",
+        "title": "Task A",
+        "source_text": "Text A",
+        "platform": "douyin",
+    }
+    payload_b = {
+        "project_id": "proj_b",
+        "title": "Task B",
+        "source_text": "Text B",
+        "platform": "douyin",
+    }
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client, username="task_filter_user")
+        client.post("/api/v1/tasks", json=payload_a, headers=headers)
+        client.post("/api/v1/tasks", json=payload_b, headers=headers)
+
+        response = client.get("/api/v1/tasks", params={"project_id": "proj_b"}, headers=headers)
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["project_id"] == "proj_b"
+
+
+def test_list_tasks_rejects_invalid_status_filter() -> None:
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client, username="task_invalid_status")
+        response = client.get("/api/v1/tasks", params={"status": "not-a-real-status"}, headers=headers)
+
+    assert response.status_code == 422

@@ -4,8 +4,8 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 
 export const metadata: Metadata = {
-  title: "Geek Movie Forge Console",
-  description: "AI-native production console for scripted short video workflows",
+  title: "Geek Movie Forge 控制台",
+  description: "面向短视频脚本工作流的 AI 原生制作控制台",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
