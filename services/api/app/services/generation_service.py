@@ -160,6 +160,23 @@ class GenerationService:
         owner_id: str,
         payload: TextGenerationRequest,
     ) -> TextGenerationResponse:
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "generate_text request: %s",
+            {
+                "owner_id": owner_id,
+                "provider_id": payload.provider_id,
+                "model": payload.model,
+                "task_type": payload.task_type,
+                "source_text_len": len(payload.source_text),
+                "source_text_preview": _preview_text(payload.source_text),
+                "prompt_preview": _preview_text(payload.prompt),
+                "preset_prompt_preview": _preview_text(payload.preset_prompt),
+                "options_keys": sorted(payload.options.keys()),
+                "save_enabled": payload.save.enabled,
+                "save_category": payload.save.category,
+            },
+        )
         provider, _ = self._provider_service.ensure_model_capability(
             owner_id,
             payload.provider_id,
@@ -202,7 +219,7 @@ class GenerationService:
                     origin=AssetOrigin.GENERATED,
                 )
             )
-        return TextGenerationResponse(
+        response = TextGenerationResponse(
             generation_id=f"gen_{uuid4().hex[:12]}",
             capability=ModelCapability.TEXT,
             provider_id=payload.provider_id,
@@ -214,6 +231,20 @@ class GenerationService:
             output_text=provider_result.output_text,
             saved_assets=saved_assets,
         )
+        logger.info(
+            "generate_text response: %s",
+            {
+                "owner_id": owner_id,
+                "generation_id": response.generation_id,
+                "provider_id": response.provider_id,
+                "model": response.model,
+                "provider_request_id": response.provider_request_id,
+                "output_text_len": len(response.output_text),
+                "output_text_preview": _preview_text(response.output_text, limit=200),
+                "saved_assets_count": len(response.saved_assets),
+            },
+        )
+        return response
 
     async def _log_and_call(
         self,
@@ -228,8 +259,29 @@ class GenerationService:
         logger = logging.getLogger(__name__)
         start = time.monotonic()
         try:
+            logger.info(
+                "provider_call start: %s",
+                {
+                    "owner_id": owner_id,
+                    "provider_id": provider.provider_id,
+                    "provider_name": provider.name,
+                    "model": model,
+                    "capability": capability.value,
+                    "request_preview": _preview_text(request_summary, limit=200),
+                },
+            )
             result = await coro
             duration_ms = int((time.monotonic() - start) * 1000)
+            logger.info(
+                "provider_call success: %s",
+                {
+                    "owner_id": owner_id,
+                    "provider_id": provider.provider_id,
+                    "model": model,
+                    "capability": capability.value,
+                    "duration_ms": duration_ms,
+                },
+            )
             if self._call_log_service:
                 try:
                     self._call_log_service.log_call(
@@ -247,6 +299,18 @@ class GenerationService:
             return result
         except Exception as exc:
             duration_ms = int((time.monotonic() - start) * 1000)
+            logger.warning(
+                "provider_call error: %s",
+                {
+                    "owner_id": owner_id,
+                    "provider_id": provider.provider_id,
+                    "model": model,
+                    "capability": capability.value,
+                    "duration_ms": duration_ms,
+                    "error": str(exc)[:500],
+                },
+                exc_info=True,
+            )
             if self._call_log_service:
                 try:
                     self._call_log_service.log_call(
@@ -257,7 +321,7 @@ class GenerationService:
                         capability=capability.value,
                         request_body_summary=request_summary[:200],
                         response_status=CallLogStatus.ERROR,
-                        error_detail=str(exc)[:500],
+                        error_detail=str(exc)[:1000],
                         duration_ms=duration_ms,
                     )
                 except Exception:
@@ -361,3 +425,15 @@ def _asset_type_for_capability(capability: ModelCapability) -> AssetType:
 def _asset_name(name_prefix: str | None, capability: ModelCapability, index: int) -> str:
     prefix = name_prefix or f"{capability.value}-result"
     return f"{prefix}-{index}"
+
+
+def _preview_text(text: str | None, *, limit: int = 200) -> str | None:
+    if text is None:
+        return None
+    value = text.strip()
+    if not value:
+        return None
+    value = value.replace("\n", "\\n")
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}..."

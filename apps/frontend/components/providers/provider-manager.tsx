@@ -7,11 +7,32 @@ import {
   updateProvider,
   deleteProvider,
 } from "@/lib/api";
-import type { ProviderResponse, ModelCapability } from "@/types/api";
+import type { ProviderResponse, ModelCapability, ProviderRoutes } from "@/types/api";
 
 type ModelRow = { model: string; capabilities: ModelCapability[]; label: string };
 
 const emptyModel: ModelRow = { model: "", capabilities: [], label: "" };
+
+type RouteKey = "text" | "image" | "video";
+type RouteState = { path: string; timeout_seconds: number };
+type RoutesState = Record<RouteKey, RouteState>;
+
+const defaultRoutes: RoutesState = {
+  text: { path: "/text/generations", timeout_seconds: 60 },
+  image: { path: "/image/generations", timeout_seconds: 60 },
+  video: { path: "/video/generations", timeout_seconds: 60 },
+};
+
+function isDefaultRoutes(routes: ProviderRoutes) {
+  return (
+    routes.text.path === defaultRoutes.text.path &&
+    routes.text.timeout_seconds === defaultRoutes.text.timeout_seconds &&
+    routes.image.path === defaultRoutes.image.path &&
+    routes.image.timeout_seconds === defaultRoutes.image.timeout_seconds &&
+    routes.video.path === defaultRoutes.video.path &&
+    routes.video.timeout_seconds === defaultRoutes.video.timeout_seconds
+  );
+}
 
 export function ProviderManager() {
   const [providers, setProviders] = useState<ProviderResponse[]>([]);
@@ -27,6 +48,8 @@ export function ProviderManager() {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState<ModelRow[]>([{ ...emptyModel }]);
+  const [routes, setRoutes] = useState<RoutesState>({ ...defaultRoutes });
+  const [showRoutes, setShowRoutes] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function load() {
@@ -49,6 +72,8 @@ export function ProviderManager() {
     setBaseUrl("");
     setApiKey("");
     setModels([{ ...emptyModel }]);
+    setRoutes({ ...defaultRoutes });
+    setShowRoutes(false);
     setEditingProvider(null);
   }
 
@@ -64,6 +89,21 @@ export function ProviderManager() {
         label: m.label ?? "",
       }))
     );
+    setRoutes({
+      text: {
+        path: p.routes.text.path ?? defaultRoutes.text.path,
+        timeout_seconds: p.routes.text.timeout_seconds ?? defaultRoutes.text.timeout_seconds,
+      },
+      image: {
+        path: p.routes.image.path ?? defaultRoutes.image.path,
+        timeout_seconds: p.routes.image.timeout_seconds ?? defaultRoutes.image.timeout_seconds,
+      },
+      video: {
+        path: p.routes.video.path ?? defaultRoutes.video.path,
+        timeout_seconds: p.routes.video.timeout_seconds ?? defaultRoutes.video.timeout_seconds,
+      },
+    });
+    setShowRoutes(!isDefaultRoutes(p.routes));
     setShowForm(true);
   }
 
@@ -101,6 +141,26 @@ export function ProviderManager() {
     setModels((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  function updateRoute(route: RouteKey, field: keyof RouteState, value: string) {
+    setRoutes((prev) => {
+      const current = prev[route];
+      if (field === "timeout_seconds") {
+        const parsed = Number(value);
+        return {
+          ...prev,
+          [route]: {
+            ...current,
+            timeout_seconds:
+              Number.isFinite(parsed) && parsed > 0
+                ? parsed
+                : defaultRoutes[route].timeout_seconds,
+          },
+        };
+      }
+      return { ...prev, [route]: { ...current, path: value } };
+    });
+  }
+
   async function handleDelete(p: ProviderResponse) {
     if (!confirm(`确定删除供应商「${p.name}」？此操作不可恢复。`)) return;
     setError("");
@@ -130,6 +190,7 @@ export function ProviderManager() {
           name,
           base_url: baseUrl,
           models: cleanModels,
+          routes,
         };
         if (apiKey) body.api_key = apiKey;
         await updateProvider(editingProvider.provider_id, body);
@@ -139,6 +200,7 @@ export function ProviderManager() {
           base_url: baseUrl,
           api_key: apiKey,
           models: cleanModels,
+          routes,
         });
       }
       setShowForm(false);
@@ -279,6 +341,68 @@ export function ProviderManager() {
                 + 添加模型
               </button>
             </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Routes（高级）</label>
+            <div className="form-hint">
+              path 支持相对路径（如 /text/generations）或完整 URL（如 https://api.example.com/v1/text/generations）。
+            </div>
+            <div className="form-actions" style={{ paddingTop: 0 }}>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setShowRoutes((prev) => !prev)}
+              >
+                {showRoutes ? "收起" : "展开"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setRoutes({ ...defaultRoutes })}
+              >
+                重置默认
+              </button>
+            </div>
+
+            {showRoutes && (
+              <div className="stack-sm">
+                {(["text", "image", "video"] as RouteKey[]).map((key) => (
+                  <div key={key} className="stack-sm">
+                    <div style={{ fontWeight: 700, color: "var(--text)" }}>
+                      {{ text: "文本", image: "图片", video: "视频" }[key] ?? key}
+                    </div>
+                    <div className="form-row" style={{ gridTemplateColumns: "2fr 1fr" }}>
+                      <div className="form-group">
+                        <label className="form-hint">path</label>
+                        <input
+                          className="form-input"
+                          value={routes[key].path}
+                          onChange={(e) => updateRoute(key, "path", e.target.value)}
+                          placeholder="/text/generations 或 https://api.example.com/v1/text/generations"
+                          aria-label={`${key} path`}
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-hint">timeout_seconds</label>
+                        <input
+                          className="form-input"
+                          type="number"
+                          min={0.1}
+                          step={0.1}
+                          value={routes[key].timeout_seconds}
+                          onChange={(e) =>
+                            updateRoute(key, "timeout_seconds", e.target.value)
+                          }
+                          aria-label={`${key} timeout_seconds`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="form-actions">

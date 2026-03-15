@@ -37,9 +37,9 @@ export type RouteConfig = {
 };
 
 export type ProviderRoutes = {
-  text?: RouteConfig;
-  image?: RouteConfig;
-  video?: RouteConfig;
+  text: RouteConfig;
+  image: RouteConfig;
+  video: RouteConfig;
 };
 
 export type ProviderResponse = {
