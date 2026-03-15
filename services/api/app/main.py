@@ -1,7 +1,8 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -24,6 +25,8 @@ from services.api.app.services.generation_service import GenerationService
 from services.api.app.services.project_service import InMemoryProjectService
 from services.api.app.services.provider_service import InMemoryProviderService
 from services.api.app.services.task_service import InMemoryTaskService
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -66,7 +69,15 @@ app.add_middleware(
 
 
 @app.exception_handler(ServiceError)
-async def handle_service_error(_, exc: ServiceError) -> JSONResponse:
+async def handle_service_error(request: Request, exc: ServiceError) -> JSONResponse:
+    logger.warning(
+        "ServiceError: method=%s path=%s status=%s detail=%s",
+        request.method,
+        request.url.path,
+        exc.status_code,
+        exc.detail,
+        exc_info=exc.status_code >= 500,
+    )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 

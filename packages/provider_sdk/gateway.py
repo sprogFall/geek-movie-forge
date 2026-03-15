@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import os
+import time
 from typing import Any, Protocol
 
 import httpx
@@ -14,6 +17,8 @@ from packages.shared.contracts.generations import (
 )
 from packages.shared.contracts.providers import ProviderEndpointConfig, ProviderRecord
 from services.api.app.services.errors import UpstreamServiceError
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderGateway(Protocol):
@@ -98,25 +103,95 @@ class HttpProviderGateway:
         endpoint: ProviderEndpointConfig,
         body: dict[str, Any],
     ) -> dict[str, Any]:
+        url = _resolve_endpoint_url(str(provider.base_url), endpoint.path)
         headers = {"Authorization": f"Bearer {provider.api_key}"}
+        log_body = _env_flag("GMF_LOG_PROVIDER_BODY", default=False)
+        start = time.monotonic()
+        response: httpx.Response | None = None
         try:
+            logger.info(
+                "Provider request: provider_id=%s provider_name=%s url=%s timeout=%.1fs keys=%s",
+                provider.provider_id,
+                provider.name,
+                url,
+                endpoint.timeout_seconds,
+                sorted(body.keys()),
+            )
+            if log_body:
+                logger.info(
+                    "Provider request body: provider_id=%s url=%s body=%s",
+                    provider.provider_id,
+                    url,
+                    _summarize_body(body),
+                )
             async with httpx.AsyncClient(
-                base_url=str(provider.base_url),
                 headers=headers,
                 timeout=endpoint.timeout_seconds,
                 transport=self._transport,
             ) as client:
-                response = await client.post(endpoint.path, json=body)
+                response = await client.post(url, json=body)
                 response.raise_for_status()
-                return response.json()
+                parsed = response.json()
+                duration_ms = int((time.monotonic() - start) * 1000)
+                logger.info(
+                    "Provider response: provider_id=%s url=%s status=%s duration_ms=%s",
+                    provider.provider_id,
+                    url,
+                    response.status_code,
+                    duration_ms,
+                )
+                if log_body:
+                    logger.info(
+                        "Provider response body: provider_id=%s url=%s body=%s",
+                        provider.provider_id,
+                        url,
+                        _summarize_body(parsed),
+                    )
+                return parsed
         except httpx.HTTPStatusError as exc:
-            raise UpstreamServiceError(
-                f"Provider request failed with status {exc.response.status_code}"
-            ) from exc
+            duration_ms = int((time.monotonic() - start) * 1000)
+            detail = _format_http_status_error(exc)
+            if exc.response.status_code == 404:
+                detail = f"{detail}. Check provider base_url and routes.*.path configuration"
+            elif exc.response.status_code in (401, 403):
+                detail = f"{detail}. Check provider api_key and permissions"
+            logger.warning(
+                "Provider HTTP error: provider_id=%s url=%s duration_ms=%s detail=%s",
+                provider.provider_id,
+                url,
+                duration_ms,
+                detail,
+            )
+            raise UpstreamServiceError(detail) from exc
         except httpx.RequestError as exc:
-            raise UpstreamServiceError("Provider request failed") from exc
+            duration_ms = int((time.monotonic() - start) * 1000)
+            url = str(getattr(exc, "request", None).url) if getattr(exc, "request", None) else None
+            detail = f"Provider request failed: {exc}"
+            if url:
+                detail = f"{detail} at {url}"
+            logger.warning(
+                "Provider request error: provider_id=%s duration_ms=%s detail=%s",
+                provider.provider_id,
+                duration_ms,
+                detail,
+            )
+            raise UpstreamServiceError(detail) from exc
         except ValueError as exc:
-            raise UpstreamServiceError("Provider returned invalid JSON") from exc
+            duration_ms = int((time.monotonic() - start) * 1000)
+            detail = "Provider returned invalid JSON"
+            if response is not None:
+                detail = f"{detail} at {response.request.method} {response.request.url}"
+                body_text = _truncate_text(response.text)
+                if body_text:
+                    detail = f"{detail}: {body_text}"
+            logger.warning(
+                "Provider response parse error: provider_id=%s url=%s duration_ms=%s detail=%s",
+                provider.provider_id,
+                url,
+                duration_ms,
+                detail,
+            )
+            raise UpstreamServiceError(detail) from exc
 
     def _parse_media_result(self, body: dict[str, Any]) -> ProviderMediaGenerationResult:
         raw_outputs = body.get("outputs")
@@ -155,3 +230,87 @@ class HttpProviderGateway:
             output_text=output_text,
             metadata=body.get("metadata") or {},
         )
+
+
+def _truncate_text(text: str, *, limit: int = 500) -> str | None:
+    value = (text or "").strip()
+    if not value:
+        return None
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}..."
+
+
+def _format_http_status_error(exc: httpx.HTTPStatusError) -> str:
+    response = exc.response
+    request = exc.request
+    reason = response.reason_phrase
+    base = f"Provider request failed with status {response.status_code}"
+    if reason:
+        base = f"{base} ({reason})"
+    base = f"{base} at {request.method} {request.url}"
+    body_text = _truncate_text(response.text)
+    if body_text:
+        return f"{base}: {body_text}"
+    return base
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _resolve_endpoint_url(base_url: str, path: str) -> str:
+    value = (path or "").strip()
+    if value.startswith(("http://", "https://")):
+        return value
+
+    base = base_url.rstrip("/")
+    rel = value.lstrip("/")
+    if not rel:
+        return base
+
+    # Allow base_url to be configured as a full endpoint URL without duplicating the route path.
+    if base.endswith("/" + rel) or base.endswith(rel):
+        return base
+    return f"{base}/{rel}"
+
+
+def _summarize_body(value: Any) -> Any:
+    if isinstance(value, dict):
+        summarized: dict[str, Any] = {}
+        for key, item in value.items():
+            if isinstance(item, str):
+                if "base64" in key:
+                    summarized[key] = f"<base64:{len(item)} chars>"
+                elif key in ("prompt", "custom_prompt", "preset_prompt", "source_text"):
+                    summarized[key] = _truncate_text(item, limit=200)
+                    summarized[f"{key}_len"] = len(item)
+                else:
+                    summarized[key] = _truncate_text(item, limit=200)
+                continue
+
+            if isinstance(item, list) and "base64" in key:
+                summarized[key] = f"<base64_list:{len(item)} items>"
+                continue
+
+            if isinstance(item, list) and key in ("image_material_urls", "scene_prompt_texts", "outputs", "data"):
+                summarized[key] = f"<list:{len(item)} items>"
+                continue
+
+            if isinstance(item, dict) and key == "options":
+                summarized[key] = {"keys": sorted(item.keys())}
+                continue
+
+            summarized[key] = item
+        return summarized
+
+    if isinstance(value, list):
+        return f"<list:{len(value)} items>"
+
+    if isinstance(value, str):
+        return _truncate_text(value, limit=200)
+
+    return value
