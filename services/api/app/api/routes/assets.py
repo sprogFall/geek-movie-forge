@@ -14,10 +14,11 @@ router = APIRouter(prefix="/api/v1/assets", tags=["assets"])
 @router.post("", response_model=AssetResponse, status_code=status.HTTP_201_CREATED)
 async def create_asset(
     payload: AssetCreateRequest,
+    origin: AssetOrigin = AssetOrigin.MANUAL,
     current_user: UserResponse = Depends(get_current_user),
     asset_service: InMemoryAssetService = Depends(get_asset_service),
 ) -> AssetResponse:
-    return asset_service.create_asset(current_user.user_id, payload)
+    return asset_service.create_asset(current_user.user_id, payload, origin=origin)
 
 
 @router.get("", response_model=AssetListResponse)

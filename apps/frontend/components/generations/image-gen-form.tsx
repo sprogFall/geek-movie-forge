@@ -1,21 +1,38 @@
 "use client";
 
-import { useState } from "react";
-import { listProviders, generateImages } from "@/lib/api";
-import type { ProviderResponse, MediaGenerationResponse } from "@/types/api";
+import { useEffect, useState } from "react";
+import { createAsset, generateImages, listProviders } from "@/lib/api";
+import { formatElapsed, useElapsedMs } from "@/lib/elapsed";
+import type { AssetResponse, MediaGenerationResponse, ProviderResponse } from "@/types/api";
 
 export function ImageGenForm() {
   const [providers, setProviders] = useState<ProviderResponse[]>([]);
-  const [providerId, setProviderId] = useState("");
+  const LAST_PROVIDER_KEY = "gmf_last_provider:image";
+  const [providerId, setProviderId] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem(LAST_PROVIDER_KEY) ?? "";
+  });
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [count, setCount] = useState(1);
-  const [saveEnabled, setSaveEnabled] = useState(false);
-  const [category, setCategory] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<MediaGenerationResponse | null>(null);
   const [loaded, setLoaded] = useState(false);
+
+  const [saveCategory, setSaveCategory] = useState("生成");
+  const [savingAssets, setSavingAssets] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [savedAssets, setSavedAssets] = useState<AssetResponse[]>([]);
+
+  const [preview, setPreview] = useState<{ src: string; title: string } | null>(null);
+
+  const elapsedMs = useElapsedMs(loading);
+
+  useEffect(() => {
+    if (!providerId) return;
+    void loadProviders();
+  }, [providerId]);
 
   async function loadProviders() {
     if (loaded) return;
@@ -26,6 +43,10 @@ export function ImageGenForm() {
       );
       setProviders(filtered);
       setLoaded(true);
+      if (providerId && !filtered.some((p) => p.provider_id === providerId)) {
+        setProviderId("");
+        setModel("");
+      }
     } catch {
       setError("加载供应商失败");
     }
@@ -35,11 +56,63 @@ export function ImageGenForm() {
   const imageModels =
     selectedProvider?.models.filter((m) => m.capabilities.includes("image")) ?? [];
 
+  function getOutputImageSrc(output: MediaGenerationResponse["outputs"][number]): string | null {
+    if (output.url) return output.url;
+    if (output.base64_data) {
+      return `data:${output.mime_type ?? "image/png"};base64,${output.base64_data}`;
+    }
+    return null;
+  }
+
+  async function handleSaveToAssets() {
+    if (!result) return;
+    if (savedAssets.length > 0) return;
+    const categoryValue = saveCategory.trim() || "生成";
+
+    setSavingAssets(true);
+    setSaveError("");
+    try {
+      const assets = await Promise.all(
+        result.outputs.map((output, index) => {
+          const srcUrl = output.url ?? null;
+          const base64 = output.base64_data ?? null;
+          if (!srcUrl && !base64) {
+            throw new Error("生成结果缺少可保存的内容");
+          }
+          const mimeType =
+            base64 != null ? output.mime_type ?? "image/png" : (output.mime_type ?? null);
+          return createAsset(
+            {
+              asset_type: "image",
+              category: categoryValue,
+              name: `image-result-${index + 1}`,
+              content_url: srcUrl,
+              content_base64: base64,
+              mime_type: mimeType,
+              metadata: output.metadata ?? {},
+              provider_id: result.provider_id,
+              model: result.model,
+              tags: [],
+            },
+            { origin: "generated" }
+          );
+        })
+      );
+      setSavedAssets(assets);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "保存失败");
+    } finally {
+      setSavingAssets(false);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
     setResult(null);
+    setSaveError("");
+    setSavedAssets([]);
     try {
       const body: Record<string, unknown> = {
         provider_id: providerId,
@@ -47,11 +120,9 @@ export function ImageGenForm() {
         prompt,
         count,
       };
-      if (saveEnabled) {
-        body.save = { enabled: true, category: category || "生成", tags: [] };
-      }
       const res = await generateImages(body);
       setResult(res);
+      localStorage.setItem(LAST_PROVIDER_KEY, providerId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "生成失败");
     } finally {
@@ -113,40 +184,16 @@ export function ImageGenForm() {
           />
         </div>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label className="form-label">数量</label>
-            <input
-              className="form-input"
-              type="number"
-              min={1}
-              max={10}
-              value={count}
-              onChange={(e) => setCount(Number(e.target.value))}
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label">分类</label>
-            <input
-              className="form-input"
-              type="text"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="例如：分镜"
-            />
-          </div>
-        </div>
-
-        <div className="form-check">
+        <div className="form-group">
+          <label className="form-label">数量</label>
           <input
-            id="save-image"
-            type="checkbox"
-            checked={saveEnabled}
-            onChange={(e) => setSaveEnabled(e.target.checked)}
+            className="form-input"
+            type="number"
+            min={1}
+            max={10}
+            value={count}
+            onChange={(e) => setCount(Number(e.target.value))}
           />
-          <label htmlFor="save-image" className="form-label">
-            保存到素材库
-          </label>
         </div>
 
         <div className="form-actions">
@@ -166,17 +213,59 @@ export function ImageGenForm() {
               已生成 {result.outputs.length} 张图片 &middot; {result.resolved_prompt.slice(0, 80)}
               {result.resolved_prompt.length > 80 ? "..." : ""}
             </div>
+
+            <div className="panel form-stack">
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">保存分类</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={saveCategory}
+                    onChange={(e) => setSaveCategory(e.target.value)}
+                    placeholder="例如：分镜"
+                    disabled={savedAssets.length > 0 || savingAssets}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">素材库</label>
+                  <div className="form-actions" style={{ paddingTop: 0 }}>
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      onClick={handleSaveToAssets}
+                      disabled={savingAssets || savedAssets.length > 0}
+                    >
+                      {savingAssets && <span className="spinner spinner-dark" />}
+                      {savedAssets.length > 0 ? "已加入素材库" : "加入素材库"}
+                    </button>
+                    {savedAssets.length > 0 && (
+                      <span style={{ color: "var(--muted)", fontSize: "0.88rem" }}>
+                        已保存 {savedAssets.length} 个
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {saveError && <div className="error-banner">{saveError}</div>}
+            </div>
+
             <div className="gen-output-grid">
               {result.outputs.map((output) => (
                 <div key={output.index} className="gen-output-card">
-                  {output.url && (
-                    <img src={output.url} alt={`生成图片 ${output.index + 1}`} />
-                  )}
-                  {output.base64_data && (
-                    <img
-                      src={`data:${output.mime_type ?? "image/png"};base64,${output.base64_data}`}
-                      alt={`生成图片 ${output.index + 1}`}
-                    />
+                  {getOutputImageSrc(output) && (
+                    <button
+                      className="gen-output-preview"
+                      type="button"
+                      onClick={() =>
+                        setPreview({
+                          src: getOutputImageSrc(output)!,
+                          title: `生成图片 ${output.index + 1}`,
+                        })
+                      }
+                    >
+                      <img src={getOutputImageSrc(output)!} alt={`生成图片 ${output.index + 1}`} />
+                    </button>
                   )}
                   <div className="gen-output-meta">
                     <small>图片 {output.index + 1}</small>
@@ -188,18 +277,44 @@ export function ImageGenForm() {
         )}
 
         {!result && !error && (
-          <div className="gen-empty">
-            <div className="gen-empty-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <path d="M21 15l-5-5L5 21" />
-              </svg>
+          <div className="gen-empty-shell">
+            <div className="gen-empty">
+              <div className="gen-empty-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="M21 15l-5-5L5 21" />
+                </svg>
+              </div>
+              <p>生成结果会显示在这里</p>
             </div>
-            <p>生成结果会显示在这里</p>
+
+            {loading && (
+              <div className="gen-empty-overlay" role="status" aria-live="polite">
+                <span className="spinner spinner-dark" />
+                <div className="gen-empty-overlay-text">
+                  <strong>生成中...</strong>
+                  <span>已用时 {formatElapsed(elapsedMs)}</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {preview && (
+        <div className="dialog-overlay" role="dialog" aria-modal="true" onClick={() => setPreview(null)}>
+          <div className="dialog-panel media-preview-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="media-preview-header">
+              <h2>{preview.title}</h2>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={() => setPreview(null)}>
+                关闭
+              </button>
+            </div>
+            <img className="media-preview-img" src={preview.src} alt={preview.title} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,22 +1,39 @@
 "use client";
 
-import { useState } from "react";
-import { listProviders, generateTexts } from "@/lib/api";
-import type { ProviderResponse, TextGenerationResponse } from "@/types/api";
+import { useEffect, useState } from "react";
+import { createAsset, generateTexts, listProviders } from "@/lib/api";
+import { formatElapsed, useElapsedMs } from "@/lib/elapsed";
+import type { AssetResponse, ProviderResponse, TextGenerationResponse } from "@/types/api";
 
 export function TextGenForm() {
   const [providers, setProviders] = useState<ProviderResponse[]>([]);
-  const [providerId, setProviderId] = useState("");
+  const LAST_PROVIDER_KEY = "gmf_last_provider:text";
+  const [providerId, setProviderId] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem(LAST_PROVIDER_KEY) ?? "";
+  });
   const [model, setModel] = useState("");
   const [taskType, setTaskType] = useState("script");
   const [sourceText, setSourceText] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [saveEnabled, setSaveEnabled] = useState(false);
-  const [category, setCategory] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<TextGenerationResponse | null>(null);
   const [loaded, setLoaded] = useState(false);
+
+  const [saveCategory, setSaveCategory] = useState("文本输出");
+  const [savingAssets, setSavingAssets] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [savedAssets, setSavedAssets] = useState<AssetResponse[]>([]);
+
+  const [copyHint, setCopyHint] = useState("");
+
+  const elapsedMs = useElapsedMs(loading);
+
+  useEffect(() => {
+    if (!providerId) return;
+    void loadProviders();
+  }, [providerId]);
 
   async function loadProviders() {
     if (loaded) return;
@@ -27,6 +44,10 @@ export function TextGenForm() {
       );
       setProviders(filtered);
       setLoaded(true);
+      if (providerId && !filtered.some((p) => p.provider_id === providerId)) {
+        setProviderId("");
+        setModel("");
+      }
     } catch {
       setError("加载供应商失败");
     }
@@ -36,11 +57,76 @@ export function TextGenForm() {
   const textModels =
     selectedProvider?.models.filter((m) => m.capabilities.includes("text")) ?? [];
 
+  async function copyToClipboard(text: string) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    if (!ok) {
+      throw new Error("复制失败");
+    }
+  }
+
+  async function handleCopy() {
+    if (!result) return;
+    setCopyHint("");
+    try {
+      await copyToClipboard(result.output_text);
+      setCopyHint("已复制");
+    } catch {
+      setCopyHint("复制失败");
+    } finally {
+      window.setTimeout(() => setCopyHint(""), 2000);
+    }
+  }
+
+  async function handleSaveToAssets() {
+    if (!result) return;
+    if (savedAssets.length > 0) return;
+    const categoryValue = saveCategory.trim() || "文本输出";
+
+    setSavingAssets(true);
+    setSaveError("");
+    try {
+      const asset = await createAsset(
+        {
+          asset_type: "text",
+          category: categoryValue,
+          name: `text-${result.task_type}-result`,
+          content_text: result.output_text,
+          metadata: {},
+          provider_id: result.provider_id,
+          model: result.model,
+          tags: [],
+        },
+        { origin: "generated" }
+      );
+      setSavedAssets([asset]);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "保存失败");
+    } finally {
+      setSavingAssets(false);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
     setResult(null);
+    setSaveError("");
+    setSavedAssets([]);
+    setCopyHint("");
     try {
       const body: Record<string, unknown> = {
         provider_id: providerId,
@@ -51,11 +137,9 @@ export function TextGenForm() {
       if (prompt.trim()) {
         body.prompt = prompt;
       }
-      if (saveEnabled) {
-        body.save = { enabled: true, category: category || "文本输出", tags: [] };
-      }
       const res = await generateTexts(body);
       setResult(res);
+      localStorage.setItem(LAST_PROVIDER_KEY, providerId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "生成失败");
     } finally {
@@ -145,18 +229,6 @@ export function TextGenForm() {
           />
         </div>
 
-        <div className="form-check">
-          <input
-            id="save-text"
-            type="checkbox"
-            checked={saveEnabled}
-            onChange={(e) => setSaveEnabled(e.target.checked)}
-          />
-          <label htmlFor="save-text" className="form-label">
-            保存到素材库
-          </label>
-        </div>
-
         <div className="form-actions">
           <button className="btn btn-primary" type="submit" disabled={loading}>
             {loading && <span className="spinner" />}
@@ -173,22 +245,77 @@ export function TextGenForm() {
             <div className="info-banner">
               已生成文本 &middot; 类型：{result.task_type} &middot; 模型：{result.model}
             </div>
+            <div className="panel form-stack">
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">保存分类</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={saveCategory}
+                    onChange={(e) => setSaveCategory(e.target.value)}
+                    placeholder="例如：台词"
+                    disabled={savedAssets.length > 0 || savingAssets}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">操作</label>
+                  <div className="form-actions" style={{ paddingTop: 0, flexWrap: "wrap" }}>
+                    <button className="btn btn-secondary" type="button" onClick={handleCopy}>
+                      复制文本
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      onClick={handleSaveToAssets}
+                      disabled={savingAssets || savedAssets.length > 0}
+                    >
+                      {savingAssets && <span className="spinner spinner-dark" />}
+                      {savedAssets.length > 0 ? "已加入素材库" : "加入素材库"}
+                    </button>
+                    {copyHint && (
+                      <span style={{ color: "var(--muted)", fontSize: "0.88rem" }}>
+                        {copyHint}
+                      </span>
+                    )}
+                    {savedAssets.length > 0 && (
+                      <span style={{ color: "var(--muted)", fontSize: "0.88rem" }}>
+                        已保存 1 个
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {saveError && <div className="error-banner">{saveError}</div>}
+            </div>
             <div className="gen-text-output">{result.output_text}</div>
           </>
         )}
 
         {!result && !error && (
-          <div className="gen-empty">
-            <div className="gen-empty-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                <path d="M14 2v6h6" />
-                <path d="M16 13H8" />
-                <path d="M16 17H8" />
-                <path d="M10 9H8" />
-              </svg>
+          <div className="gen-empty-shell">
+            <div className="gen-empty">
+              <div className="gen-empty-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                  <path d="M14 2v6h6" />
+                  <path d="M16 13H8" />
+                  <path d="M16 17H8" />
+                  <path d="M10 9H8" />
+                </svg>
+              </div>
+              <p>生成结果会显示在这里</p>
             </div>
-            <p>生成结果会显示在这里</p>
+
+            {loading && (
+              <div className="gen-empty-overlay" role="status" aria-live="polite">
+                <span className="spinner spinner-dark" />
+                <div className="gen-empty-overlay-text">
+                  <strong>生成中...</strong>
+                  <span>已用时 {formatElapsed(elapsedMs)}</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -17,6 +17,7 @@ from services.api.app.api.routes.providers import router as providers_router
 from services.api.app.api.routes.tasks import router as tasks_router
 from services.api.app.core.config import get_settings
 from services.api.app.core.store import JsonFileStore
+from services.api.app.middleware.api_logging import ApiLoggingMiddleware
 from services.api.app.services.asset_service import InMemoryAssetService
 from services.api.app.services.auth_service import InMemoryAuthService
 from services.api.app.services.call_log_service import InMemoryCallLogService
@@ -66,6 +67,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(ApiLoggingMiddleware, skip_paths={"/api/v1/health"})
 
 
 @app.exception_handler(ServiceError)

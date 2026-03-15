@@ -170,8 +170,9 @@ export function getAsset(id: string) {
   return request<AssetResponse>(`/api/v1/assets/${id}`);
 }
 
-export function createAsset(body: Record<string, unknown>) {
-  return request<AssetResponse>("/api/v1/assets", {
+export function createAsset(body: Record<string, unknown>, params?: Record<string, string>) {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return request<AssetResponse>(`/api/v1/assets${qs}`, {
     method: "POST",
     body: JSON.stringify(body),
   });

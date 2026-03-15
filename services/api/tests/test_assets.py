@@ -29,3 +29,19 @@ def test_assets_are_isolated_per_user() -> None:
     assert other_list_response.status_code == 200
     assert other_list_response.json()["items"] == []
     assert other_detail_response.status_code == 404
+
+
+def test_create_asset_supports_origin_query_param() -> None:
+    payload = {
+        "asset_type": "text",
+        "category": "generated",
+        "name": "generated-text",
+        "content_text": "hello",
+    }
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client, username="asset_origin")
+        response = client.post("/api/v1/assets?origin=generated", json=payload, headers=headers)
+
+    assert response.status_code == 201
+    assert response.json()["origin"] == "generated"
