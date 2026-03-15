@@ -23,6 +23,25 @@ const defaultRoutes: RoutesState = {
   video: { path: "/video/generations", timeout_seconds: 60 },
 };
 
+function hasTextCapability(models: ModelRow[]) {
+  return models.some((model) => model.capabilities.includes("text"));
+}
+
+function looksLikeVersionRootEndpoint(value: string) {
+  const trimmed = value.trim().replace(/\/+$/, "");
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed === "/v1" || trimmed === "v1") {
+    return true;
+  }
+  try {
+    return new URL(trimmed).pathname.replace(/\/+$/, "") === "/v1";
+  } catch {
+    return false;
+  }
+}
+
 function isDefaultRoutes(routes: ProviderRoutes) {
   return (
     routes.text.path === defaultRoutes.text.path &&
@@ -51,6 +70,8 @@ export function ProviderManager() {
   const [routes, setRoutes] = useState<RoutesState>({ ...defaultRoutes });
   const [showRoutes, setShowRoutes] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const textProviderSelected = hasTextCapability(models);
+  const textRouteLooksWrong = textProviderSelected && looksLikeVersionRootEndpoint(routes.text.path);
 
   async function load() {
     try {
@@ -348,6 +369,19 @@ export function ProviderManager() {
             <div className="form-hint">
               path 支持相对路径（如 /text/generations）或完整 URL（如 https://api.example.com/v1/text/generations）。
             </div>
+            {textProviderSelected && (
+              <div className="form-hint">
+                For OpenAI-compatible text APIs, use <code>https://api.example.com/v1</code> as
+                the base URL and <code>/chat/completions</code> as the text path.
+              </div>
+            )}
+            {textRouteLooksWrong && (
+              <div className="error-banner">
+                Text route looks incomplete. <code>/v1</code> is usually a version prefix, not a
+                POST endpoint. If this provider is OpenAI-compatible, set the text path to{" "}
+                <code>/chat/completions</code>.
+              </div>
+            )}
             <div className="form-actions" style={{ paddingTop: 0 }}>
               <button
                 type="button"

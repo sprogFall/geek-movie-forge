@@ -85,16 +85,9 @@ class HttpProviderGateway:
         provider: ProviderRecord,
         payload: TextGenerationPayload,
     ) -> ProviderTextGenerationResult:
-        body = {
-            "model": payload.model,
-            "task_type": payload.task_type,
-            "source_text": payload.source_text,
-            "prompt": payload.resolved_prompt,
-            "custom_prompt": payload.prompt,
-            "preset_prompt": payload.preset_prompt,
-            "options": payload.options,
-        }
-        response = await self._post(provider, provider.routes.text, body)
+        url = _resolve_endpoint_url(str(provider.base_url), provider.routes.text.path)
+        body = _build_text_request_body(url, payload)
+        response = await self._post(provider, provider.routes.text, body, url=url)
         return self._parse_text_result(response)
 
     async def _post(
@@ -102,8 +95,10 @@ class HttpProviderGateway:
         provider: ProviderRecord,
         endpoint: ProviderEndpointConfig,
         body: dict[str, Any],
+        *,
+        url: str | None = None,
     ) -> dict[str, Any]:
-        url = _resolve_endpoint_url(str(provider.base_url), endpoint.path)
+        url = url or resolve_endpoint_url(str(provider.base_url), endpoint.path)
         headers = {"Authorization": f"Bearer {provider.api_key}"}
         log_body = _env_flag("GMF_LOG_PROVIDER_BODY", default=False)
         start = time.monotonic()
@@ -218,6 +213,20 @@ class HttpProviderGateway:
         )
 
     def _parse_text_result(self, body: dict[str, Any]) -> ProviderTextGenerationResult:
+        if isinstance(body.get("choices"), list):
+            output_text = _extract_openai_choice_text(body["choices"])
+            if output_text:
+                metadata = body.get("metadata") or {}
+                if isinstance(body.get("usage"), dict):
+                    metadata = {**metadata, "usage": body["usage"]}
+                return ProviderTextGenerationResult(
+                    provider_request_id=body.get("provider_request_id")
+                    or body.get("request_id")
+                    or body.get("id"),
+                    output_text=output_text,
+                    metadata=metadata,
+                )
+
         output_text = body.get("output_text") or body.get("text") or body.get("content")
         if output_text is None:
             outputs = body.get("outputs") or body.get("data") or []
@@ -314,3 +323,80 @@ def _summarize_body(value: Any) -> Any:
         return _truncate_text(value, limit=200)
 
     return value
+
+
+def _build_text_request_body(url: str, payload: TextGenerationPayload) -> dict[str, Any]:
+    if _is_openai_chat_endpoint(url):
+        body = {
+            key: value
+            for key, value in payload.options.items()
+            if key not in {"model", "messages", "stream"}
+        }
+        body["model"] = payload.model
+        body["messages"] = _build_openai_messages(payload)
+        body["stream"] = False
+        return body
+
+    return {
+        "model": payload.model,
+        "task_type": payload.task_type,
+        "source_text": payload.source_text,
+        "prompt": payload.resolved_prompt,
+        "custom_prompt": payload.prompt,
+        "preset_prompt": payload.preset_prompt,
+        "options": payload.options,
+    }
+
+
+def _is_openai_chat_endpoint(url: str) -> bool:
+    return url.rstrip("/").endswith("/chat/completions")
+
+
+def _build_openai_messages(payload: TextGenerationPayload) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    if payload.resolved_prompt:
+        messages.append({"role": "system", "content": payload.resolved_prompt})
+
+    user_parts = [f"Task type: {payload.task_type}", "", "Source text:", payload.source_text]
+    messages.append({"role": "user", "content": "\n".join(user_parts)})
+    return messages
+
+
+def _extract_openai_choice_text(choices: list[Any]) -> str | None:
+    if not choices:
+        return None
+
+    first_choice = choices[0] or {}
+    message = first_choice.get("message") if isinstance(first_choice, dict) else None
+    if isinstance(message, dict):
+        content = message.get("content")
+        text = _coerce_openai_content_to_text(content)
+        if text:
+            return text
+
+    if isinstance(first_choice, dict):
+        content = first_choice.get("text")
+        if isinstance(content, str) and content.strip():
+            return content
+    return None
+
+
+def _coerce_openai_content_to_text(content: Any) -> str | None:
+    if isinstance(content, str):
+        return content.strip() or None
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                if item.strip():
+                    parts.append(item.strip())
+                continue
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+        if parts:
+            return "\n".join(parts)
+    return None

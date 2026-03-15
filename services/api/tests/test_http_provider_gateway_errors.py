@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 
 import httpx
@@ -150,3 +151,43 @@ def test_http_provider_gateway_uses_absolute_url_when_configured() -> None:
 
     detail = asyncio.run(_run())
     assert f"POST {expected_url}" in detail
+
+
+def test_http_provider_gateway_uses_openai_compatible_chat_payload_when_configured() -> None:
+    expected_url = "https://provider.example.com/v1/chat/completions"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == expected_url
+        body = json.loads(request.content.decode("utf-8"))
+        assert body["model"] == "moonshotai/Kimi-K2.5"
+        assert body["stream"] is False
+        assert body["messages"][0] == {"role": "system", "content": "Write a trailer"}
+        assert body["messages"][1]["role"] == "user"
+        assert "Task type: script_writing" in body["messages"][1]["content"]
+        assert "Source text:\nA pilot is stranded on Mars." in body["messages"][1]["content"]
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl_123",
+                "choices": [{"message": {"content": "Opening shot: red dust and silence."}}],
+                "usage": {"total_tokens": 42},
+            },
+            request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+    gateway = HttpProviderGateway(transport=transport)
+    provider = _provider_record()
+    provider.routes.text.path = expected_url
+    payload = TextGenerationPayload(
+        provider_id=provider.provider_id,
+        model="moonshotai/Kimi-K2.5",
+        task_type="script_writing",
+        source_text="A pilot is stranded on Mars.",
+        resolved_prompt="Write a trailer",
+    )
+
+    result = asyncio.run(gateway.generate_text(provider, payload))
+    assert result.provider_request_id == "chatcmpl_123"
+    assert result.output_text == "Opening shot: red dust and silence."
+    assert result.metadata["usage"]["total_tokens"] == 42
