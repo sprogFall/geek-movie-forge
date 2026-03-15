@@ -2,7 +2,7 @@
   "name": "@geek-movie-forge/frontend",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "build": "next build && node ./scripts/prepare-standalone.cjs",
     "start": "node ./.next/standalone/apps/frontend/server.js",
     "lint": "next lint",

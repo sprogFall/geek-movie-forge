@@ -51,23 +51,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // 优先从 localStorage 恢复用户态，避免白屏等待
+    // 优先从 localStorage 恢复用户态，立即解除 loading
     const stored = getStoredUser();
     if (stored) {
       setUser(stored);
       setLoading(false);
     }
 
-    // 后台校验 token 有效性
+    // 后台校验 token 有效性（不阻塞页面渲染）
     fetchMe()
       .then((u) => {
         setUser(u);
         storeAuth(token, u);
       })
       .catch(() => {
-        logout();
+        // 仅在后台校验失败时登出，不影响已恢复的状态
+        if (!stored) logout();
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        // 兜底：确保即使无 stored user 也能结束 loading
+        setLoading(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

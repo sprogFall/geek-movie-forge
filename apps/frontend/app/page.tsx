@@ -56,20 +56,26 @@ export default function HomePage() {
     setLoading(true);
     setError("");
     try {
-      const [taskData, projectData, assetData, providerData] = await Promise.all([
+      const results = await Promise.allSettled([
         listTasks(),
         listProjects(),
         listAssets(),
         listProviders(),
       ]);
-      const nextTasks = taskData.items ?? [];
-      const nextProjects = projectData.items ?? [];
-      const nextAssets = assetData.items ?? [];
-      const nextProviders = providerData.items ?? [];
+
+      const extract = <T,>(r: PromiseSettledResult<{ items?: T[] }>): T[] =>
+        r.status === "fulfilled" ? r.value.items ?? [] : [];
+      const nextTasks = extract<TaskResponse>(results[0] as PromiseSettledResult<{ items?: TaskResponse[] }>);
+      const nextProjects = extract<ProjectResponse>(results[1] as PromiseSettledResult<{ items?: ProjectResponse[] }>);
+      const nextAssets = extract<AssetResponse>(results[2] as PromiseSettledResult<{ items?: AssetResponse[] }>);
+      const nextProviders = extract<ProviderResponse>(results[3] as PromiseSettledResult<{ items?: ProviderResponse[] }>);
 
       setTasks(nextTasks);
       setProjects(nextProjects);
       setMetrics(buildMetrics(nextProjects, nextTasks, nextAssets, nextProviders));
+
+      const anyFailed = results.some((r) => r.status === "rejected");
+      if (anyFailed) setError("部分数据加载失败，显示可能不完整");
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {

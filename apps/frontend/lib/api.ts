@@ -56,17 +56,41 @@ export function setOnUnauthorized(cb: () => void) {
   onUnauthorized = cb;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+const DEFAULT_TIMEOUT = 10_000; // 普通请求 10 秒
+const LONG_TIMEOUT = 300_000; // 生成类请求 5 分钟
+
+type RequestOptions = RequestInit & { timeout?: number };
+
+async function request<T>(path: string, init?: RequestOptions): Promise<T> {
+  const { timeout = DEFAULT_TIMEOUT, ...fetchInit } = init ?? {};
   const token = getStoredToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(init?.headers as Record<string, string>),
+    ...(fetchInit.headers as Record<string, string>),
   };
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...fetchInit,
+      headers,
+      signal: fetchInit.signal ?? controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("请求超时，请检查后端服务是否正常运行");
+    }
+    throw new Error("无法连接到后端服务");
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (res.status === 401) {
     // 登录/注册接口的 401 表示凭证错误，不应触发"过期"逻辑
@@ -159,6 +183,7 @@ export function generateImages(body: Record<string, unknown>) {
   return request<MediaGenerationResponse>("/api/v1/generations/images", {
     method: "POST",
     body: JSON.stringify(body),
+    timeout: LONG_TIMEOUT,
   });
 }
 
@@ -166,6 +191,7 @@ export function generateVideos(body: Record<string, unknown>) {
   return request<MediaGenerationResponse>("/api/v1/generations/videos", {
     method: "POST",
     body: JSON.stringify(body),
+    timeout: LONG_TIMEOUT,
   });
 }
 
@@ -173,6 +199,7 @@ export function generateTexts(body: Record<string, unknown>) {
   return request<TextGenerationResponse>("/api/v1/generations/texts", {
     method: "POST",
     body: JSON.stringify(body),
+    timeout: LONG_TIMEOUT,
   });
 }
 
