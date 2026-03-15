@@ -7,6 +7,8 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 from packages.shared.enums.model_capability import ModelCapability
 
+ProviderAdapterType = Literal["generic_json", "modelscope"]
+
 
 class ProviderModelConfig(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -53,7 +55,7 @@ class ProviderConfigCreateRequest(BaseModel):
     name: str = Field(min_length=1)
     base_url: AnyHttpUrl
     api_key: str = Field(min_length=1)
-    adapter_type: Literal["generic_json"] = "generic_json"
+    adapter_type: ProviderAdapterType = "generic_json"
     models: list[ProviderModelConfig] = Field(min_length=1)
     routes: ProviderRoutes = Field(default_factory=ProviderRoutes)
 
@@ -96,9 +98,10 @@ class ProviderResponse(BaseModel):
     name: str
     base_url: AnyHttpUrl
     api_key_masked: str
-    adapter_type: Literal["generic_json"]
+    adapter_type: ProviderAdapterType
     models: list[ProviderModelConfig]
     routes: ProviderRoutes
+    is_builtin: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -113,9 +116,10 @@ class ProviderRecord(BaseModel):
     name: str
     base_url: AnyHttpUrl
     api_key: str
-    adapter_type: Literal["generic_json"] = "generic_json"
+    adapter_type: ProviderAdapterType = "generic_json"
     models: list[ProviderModelConfig]
     routes: ProviderRoutes = Field(default_factory=ProviderRoutes)
+    is_builtin: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -128,6 +132,7 @@ class ProviderRecord(BaseModel):
             adapter_type=self.adapter_type,
             models=self.models,
             routes=self.routes,
+            is_builtin=self.is_builtin,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )

@@ -50,6 +50,7 @@ export type ProviderResponse = {
   adapter_type: string;
   models: ModelEntry[];
   routes: ProviderRoutes;
+  is_builtin: boolean;
   created_at: string;
   updated_at: string;
 };

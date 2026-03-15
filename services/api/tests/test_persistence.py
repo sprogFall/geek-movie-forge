@@ -6,6 +6,10 @@ from services.api.app.core.store import JsonFileStore
 from services.api.app.services.provider_service import InMemoryProviderService
 
 
+def _custom_provider_names(service: InMemoryProviderService, owner_id: str) -> list[str]:
+    return [item.name for item in service.list_providers(owner_id).items if not item.is_builtin]
+
+
 def test_provider_data_survives_restart(tmp_path: Path) -> None:
     """Create data with one store, then create a new service with the same store and verify."""
     store = JsonFileStore(tmp_path)
@@ -23,8 +27,8 @@ def test_provider_data_survives_restart(tmp_path: Path) -> None:
     # Simulate restart — new service instance, same store
     service2 = InMemoryProviderService(store=store)
     providers = service2.list_providers("user_001")
-    assert len(providers.items) == 1
-    assert providers.items[0].name == "Persist Provider"
+    assert len(providers.items) == 2
+    assert _custom_provider_names(service2, "user_001") == ["Persist Provider"]
 
 
 def test_store_none_does_not_persist(tmp_path: Path) -> None:
@@ -52,7 +56,8 @@ def test_corrupt_json_degrades_gracefully(tmp_path: Path) -> None:
 
     service = InMemoryProviderService(store=store)
     providers = service.list_providers("user_001")
-    assert providers.items == []
+    assert len(providers.items) == 1
+    assert providers.items[0].is_builtin is True
 
 
 def test_json_file_store_atomic_write(tmp_path: Path) -> None:
@@ -83,4 +88,6 @@ def test_delete_persists_removal(tmp_path: Path) -> None:
     service.delete_provider("user_001", resp.provider_id)
 
     service2 = InMemoryProviderService(store=store)
-    assert service2.list_providers("user_001").items == []
+    items = service2.list_providers("user_001").items
+    assert len(items) == 1
+    assert items[0].is_builtin is True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -58,6 +59,8 @@ class HttpProviderGateway:
             "preset_prompt": payload.preset_prompt,
             "options": payload.options,
         }
+        if provider.adapter_type == "modelscope":
+            return await self._generate_modelscope_image(provider, provider.routes.image, body)
         response = await self._post(provider, provider.routes.image, body)
         return self._parse_media_result(response)
 
@@ -97,22 +100,59 @@ class HttpProviderGateway:
         body: dict[str, Any],
         *,
         url: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        url = url or resolve_endpoint_url(str(provider.base_url), endpoint.path)
-        headers = {"Authorization": f"Bearer {provider.api_key}"}
+        url = url or _resolve_endpoint_url(str(provider.base_url), endpoint.path)
+        return await self._request_json(
+            method="POST",
+            provider=provider,
+            endpoint=endpoint,
+            url=url,
+            body=body,
+            headers=headers,
+        )
+
+    async def _get(
+        self,
+        provider: ProviderRecord,
+        endpoint: ProviderEndpointConfig,
+        *,
+        url: str,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return await self._request_json(
+            method="GET",
+            provider=provider,
+            endpoint=endpoint,
+            url=url,
+            headers=headers,
+        )
+
+    async def _request_json(
+        self,
+        *,
+        method: str,
+        provider: ProviderRecord,
+        endpoint: ProviderEndpointConfig,
+        url: str,
+        body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        request_headers = _build_request_headers(provider.api_key, headers)
         log_body = _env_flag("GMF_LOG_PROVIDER_BODY", default=False)
         start = time.monotonic()
         response: httpx.Response | None = None
         try:
             logger.info(
-                "Provider request: provider_id=%s provider_name=%s url=%s timeout=%.1fs keys=%s",
+                "Provider request: provider_id=%s provider_name=%s method=%s url=%s timeout=%.1fs keys=%s",
                 provider.provider_id,
                 provider.name,
+                method,
                 url,
                 endpoint.timeout_seconds,
-                sorted(body.keys()),
+                sorted(body.keys()) if body else [],
             )
-            if log_body:
+            if log_body and body is not None:
                 logger.info(
                     "Provider request body: provider_id=%s url=%s body=%s",
                     provider.provider_id,
@@ -120,11 +160,11 @@ class HttpProviderGateway:
                     _summarize_body(body),
                 )
             async with httpx.AsyncClient(
-                headers=headers,
+                headers=request_headers,
                 timeout=endpoint.timeout_seconds,
                 transport=self._transport,
             ) as client:
-                response = await client.post(url, json=body)
+                response = await client.request(method, url, json=body)
                 response.raise_for_status()
                 parsed = response.json()
                 duration_ms = int((time.monotonic() - start) * 1000)
@@ -187,6 +227,47 @@ class HttpProviderGateway:
                 detail,
             )
             raise UpstreamServiceError(detail) from exc
+
+    async def _generate_modelscope_image(
+        self,
+        provider: ProviderRecord,
+        endpoint: ProviderEndpointConfig,
+        body: dict[str, Any],
+    ) -> ProviderMediaGenerationResult:
+        submit_url = _resolve_endpoint_url(str(provider.base_url), endpoint.path)
+        submit_result = await self._post(
+            provider,
+            endpoint,
+            body,
+            url=submit_url,
+            headers={"X-ModelScope-Async-Mode": "true"},
+        )
+        task_id = submit_result.get("task_id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise UpstreamServiceError("ModelScope image generation response missing task_id")
+
+        poll_url = _resolve_modelscope_task_url(str(provider.base_url), task_id)
+        deadline = time.monotonic() + endpoint.timeout_seconds
+        while True:
+            task_result = await self._get(
+                provider,
+                endpoint,
+                url=poll_url,
+                headers={"X-ModelScope-Task-Type": "image_generation"},
+            )
+            task_status = str(task_result.get("task_status") or "").upper()
+            if task_status == "SUCCEED":
+                return _parse_modelscope_image_result(task_id, task_result)
+            if task_status in {"FAILED", "CANCELED", "CANCELLED"}:
+                detail = _extract_modelscope_error_message(task_result)
+                if not detail:
+                    detail = f"ModelScope image generation ended with status {task_status}"
+                raise UpstreamServiceError(detail)
+            if time.monotonic() >= deadline:
+                raise UpstreamServiceError(
+                    f"ModelScope image generation timed out while waiting for task {task_id}"
+                )
+            await asyncio.sleep(1.0)
 
     def _parse_media_result(self, body: dict[str, Any]) -> ProviderMediaGenerationResult:
         raw_outputs = body.get("outputs")
@@ -271,6 +352,16 @@ def _env_flag(name: str, *, default: bool = False) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _build_request_headers(
+    api_key: str,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {api_key}"}
+    if extra_headers:
+        headers.update(extra_headers)
+    return headers
+
+
 def _resolve_endpoint_url(base_url: str, path: str) -> str:
     value = (path or "").strip()
     if value.startswith(("http://", "https://")):
@@ -285,6 +376,13 @@ def _resolve_endpoint_url(base_url: str, path: str) -> str:
     if base.endswith("/" + rel) or base.endswith(rel):
         return base
     return f"{base}/{rel}"
+
+
+def _resolve_modelscope_task_url(base_url: str, task_id: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/v1"):
+        return f"{base}/tasks/{task_id}"
+    return _resolve_endpoint_url(base_url, f"/v1/tasks/{task_id}")
 
 
 def _summarize_body(value: Any) -> Any:
@@ -323,6 +421,45 @@ def _summarize_body(value: Any) -> Any:
         return _truncate_text(value, limit=200)
 
     return value
+
+
+def _parse_modelscope_image_result(
+    task_id: str,
+    body: dict[str, Any],
+) -> ProviderMediaGenerationResult:
+    raw_outputs = body.get("output_images") or body.get("images") or []
+    outputs: list[GeneratedMediaOutput] = []
+    for index, item in enumerate(raw_outputs):
+        if isinstance(item, str):
+            outputs.append(GeneratedMediaOutput(index=index, url=item))
+            continue
+        if isinstance(item, dict):
+            outputs.append(
+                GeneratedMediaOutput(
+                    index=item.get("index", index),
+                    url=item.get("url") or item.get("image_url"),
+                    base64_data=item.get("base64_data") or item.get("b64_json"),
+                    mime_type=item.get("mime_type") or item.get("content_type"),
+                    metadata=item.get("metadata") or {},
+                )
+            )
+    if not outputs:
+        raise UpstreamServiceError("ModelScope image generation succeeded but returned no images")
+    return ProviderMediaGenerationResult(provider_request_id=task_id, outputs=outputs)
+
+
+def _extract_modelscope_error_message(body: dict[str, Any]) -> str | None:
+    errors = body.get("errors")
+    if isinstance(errors, dict):
+        for key in ("message", "detail", "error"):
+            value = errors.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    for key in ("message", "detail", "error_message"):
+        value = body.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _build_text_request_body(url: str, payload: TextGenerationPayload) -> dict[str, Any]:

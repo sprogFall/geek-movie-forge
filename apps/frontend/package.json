@@ -3,8 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "build": "next build && node ./scripts/prepare-standalone.cjs",
+    "start": "node ./.next/standalone/apps/frontend/server.js",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },

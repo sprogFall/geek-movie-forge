@@ -183,6 +183,10 @@ export function ProviderManager() {
   }
 
   async function handleDelete(p: ProviderResponse) {
+    if (p.is_builtin) {
+      setError("内置供应商不允许删除");
+      return;
+    }
     if (!confirm(`确定删除供应商「${p.name}」？此操作不可恢复。`)) return;
     setError("");
     try {
@@ -466,7 +470,20 @@ export function ProviderManager() {
           {providers.map((p) => (
             <article key={p.provider_id} className="provider-card">
               <div>
-                <h3>{p.name}</h3>
+                <h3>
+                  {p.name}
+                  {p.is_builtin ? (
+                    <span
+                      style={{
+                        marginLeft: "0.5rem",
+                        fontSize: "0.75rem",
+                        color: "var(--muted)",
+                      }}
+                    >
+                      内置
+                    </span>
+                  ) : null}
+                </h3>
                 <div className="provider-card-url">{p.base_url}</div>
                 <div className="provider-card-key">{p.api_key_masked}</div>
               </div>
@@ -499,6 +516,7 @@ export function ProviderManager() {
                   </button>
                   <button
                     className="btn btn-sm btn-danger"
+                    disabled={p.is_builtin}
                     onClick={() => handleDelete(p)}
                   >
                     删除
