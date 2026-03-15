@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 
 import {
@@ -43,22 +43,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOnUnauthorized(logout);
   }, [logout]);
 
+  // 初始化认证状态——仅在挂载时执行一次
   useEffect(() => {
     const token = getStoredToken();
     if (!token) {
       setLoading(false);
-      if (!PUBLIC_PATHS.includes(pathname)) {
-        router.replace("/login");
-      }
       return;
     }
 
+    // 优先从 localStorage 恢复用户态，避免白屏等待
     const stored = getStoredUser();
     if (stored) {
       setUser(stored);
       setLoading(false);
     }
 
+    // 后台校验 token 有效性
     fetchMe()
       .then((u) => {
         setUser(u);
@@ -68,33 +68,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout();
       })
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 统一路由守卫：合并为单个 effect，减少重渲染次数
   useEffect(() => {
-    if (!loading && !user && !PUBLIC_PATHS.includes(pathname)) {
+    if (loading) return;
+    const isPublic = PUBLIC_PATHS.includes(pathname);
+    if (!user && !isPublic) {
       router.replace("/login");
-    }
-  }, [loading, user, pathname, router]);
-
-  useEffect(() => {
-    if (!loading && user && PUBLIC_PATHS.includes(pathname)) {
+    } else if (user && isPublic) {
       router.replace("/");
     }
   }, [loading, user, pathname, router]);
 
-  async function handleLogin(username: string, password: string) {
-    const res = await apiLogin(username, password);
-    storeAuth(res.access_token, res.user);
-    setUser(res.user);
-    router.push("/");
-  }
+  const handleLogin = useCallback(
+    async (username: string, password: string) => {
+      const res = await apiLogin(username, password);
+      storeAuth(res.access_token, res.user);
+      setUser(res.user);
+      router.push("/");
+    },
+    [router],
+  );
 
-  async function handleRegister(username: string, password: string) {
-    const res = await apiRegister(username, password);
-    storeAuth(res.access_token, res.user);
-    setUser(res.user);
-    router.push("/");
-  }
+  const handleRegister = useCallback(
+    async (username: string, password: string) => {
+      const res = await apiRegister(username, password);
+      storeAuth(res.access_token, res.user);
+      setUser(res.user);
+      router.push("/");
+    },
+    [router],
+  );
+
+  // 稳定的 context value——仅在 user/loading/函数引用变化时生成新对象
+  const value = useMemo<AuthState>(
+    () => ({ user, loading, login: handleLogin, register: handleRegister, logout }),
+    [user, loading, handleLogin, handleRegister, logout],
+  );
 
   if (loading) {
     return (
@@ -112,9 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider
-      value={{ user, loading, login: handleLogin, register: handleRegister, logout }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

@@ -69,9 +69,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
 
   if (res.status === 401) {
-    clearAuth();
-    onUnauthorized?.();
-    throw new Error("登录已过期，请重新登录");
+    // 登录/注册接口的 401 表示凭证错误，不应触发"过期"逻辑
+    const isAuthEndpoint =
+      path.startsWith("/api/v1/auth/login") || path.startsWith("/api/v1/auth/register");
+    if (!isAuthEndpoint) {
+      clearAuth();
+      onUnauthorized?.();
+      throw new Error("登录已过期，请重新登录");
+    }
   }
 
   if (!res.ok) {
