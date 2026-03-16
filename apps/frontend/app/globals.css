@@ -1076,6 +1076,39 @@ select {
   overflow: auto;
 }
 
+.markdown-preview :where(table) {
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border-spacing: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.markdown-preview :where(th, td) {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  white-space: nowrap;
+}
+
+.markdown-preview :where(th) {
+  font-weight: 800;
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.markdown-preview :where(tr:last-child td) {
+  border-bottom: 0;
+}
+
+.markdown-preview :where(td:last-child, th:last-child) {
+  border-right: 0;
+}
+
 /* ── Responsive ── */
 
 @media (max-width: 1024px) {

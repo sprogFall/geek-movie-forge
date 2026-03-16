@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { deleteAsset, updateAsset } from "@/lib/api";
 import type { AssetResponse } from "@/types/api";
 
@@ -122,7 +123,7 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
             </div>
             {mode === "preview" ? (
               <div className="markdown-preview">
-                <ReactMarkdown>{contentText}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{contentText}</ReactMarkdown>
               </div>
             ) : (
               <textarea
@@ -164,4 +165,3 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
     </div>
   );
 }
-
