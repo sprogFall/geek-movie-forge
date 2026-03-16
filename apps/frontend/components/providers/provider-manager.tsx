@@ -473,14 +473,8 @@ export function ProviderManager() {
                 <h3>
                   {p.name}
                   {p.is_builtin ? (
-                    <span
-                      style={{
-                        marginLeft: "0.5rem",
-                        fontSize: "0.75rem",
-                        color: "var(--muted)",
-                      }}
-                    >
-                      内置
+                    <span className="tag-pill builtin-badge" style={{ marginLeft: "0.5rem" }}>
+                      系统内置
                     </span>
                   ) : null}
                 </h3>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createAsset, generateVideos, listProviders } from "@/lib/api";
+import { createAsset, generateVideos, listAssets, listProviders } from "@/lib/api";
 import { formatElapsed, useElapsedMs } from "@/lib/elapsed";
 import type { AssetResponse, MediaGenerationResponse, ProviderResponse } from "@/types/api";
 
@@ -16,6 +16,12 @@ export function VideoGenForm() {
   const [prompt, setPrompt] = useState("");
   const [count, setCount] = useState(1);
   const [imageMaterialUrls, setImageMaterialUrls] = useState("");
+  const [imageMaterialAssetIds, setImageMaterialAssetIds] = useState<string[]>([]);
+  const [imageAssets, setImageAssets] = useState<AssetResponse[]>([]);
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+  const [assetPickerLoading, setAssetPickerLoading] = useState(false);
+  const [assetPickerError, setAssetPickerError] = useState("");
+  const [uploadingRefs, setUploadingRefs] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<MediaGenerationResponse | null>(null);
@@ -58,6 +64,72 @@ export function VideoGenForm() {
   const selectedProvider = providers.find((p) => p.provider_id === providerId);
   const videoModels =
     selectedProvider?.models.filter((m) => m.capabilities.includes("video")) ?? [];
+
+  const selectedImageAssets = imageAssets.filter((a) => imageMaterialAssetIds.includes(a.asset_id));
+
+  async function openAssetPicker() {
+    setAssetPickerOpen(true);
+    if (imageAssets.length > 0) return;
+    setAssetPickerLoading(true);
+    setAssetPickerError("");
+    try {
+      const data = await listAssets({ asset_type: "image" });
+      setImageAssets(data.items);
+    } catch (err) {
+      setAssetPickerError(err instanceof Error ? err.message : "加载素材失败");
+    } finally {
+      setAssetPickerLoading(false);
+    }
+  }
+
+  function toggleImageAsset(assetId: string) {
+    setImageMaterialAssetIds((prev) =>
+      prev.includes(assetId) ? prev.filter((id) => id !== assetId) : [...prev, assetId]
+    );
+  }
+
+  async function handleUploadRefs(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploadingRefs(true);
+    setError("");
+    try {
+      const items = Array.from(files);
+      const uploaded = await Promise.all(
+        items.map(async (file) => {
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = String(reader.result ?? "");
+              const comma = result.indexOf(",");
+              if (comma === -1) return reject(new Error("无法读取图片内容"));
+              resolve(result.slice(comma + 1));
+            };
+            reader.onerror = () => reject(new Error("无法读取图片内容"));
+            reader.readAsDataURL(file);
+          });
+          return createAsset({
+            asset_type: "image",
+            category: "reference",
+            name: file.name || "uploaded-reference",
+            content_base64: base64,
+            mime_type: file.type || "image/png",
+            tags: ["reference"],
+            metadata: { uploaded_for: "video_generation" },
+          });
+        })
+      );
+      setImageAssets((prev) => [...uploaded, ...prev]);
+      setImageMaterialAssetIds((prev) => {
+        const next = new Set(prev);
+        for (const asset of uploaded) next.add(asset.asset_id);
+        return Array.from(next);
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "上传失败");
+    } finally {
+      setUploadingRefs(false);
+    }
+  }
 
   async function handleSaveToAssets() {
     if (!result) return;
@@ -115,6 +187,9 @@ export function VideoGenForm() {
         prompt,
         count,
       };
+      if (imageMaterialAssetIds.length > 0) {
+        body.image_material_asset_ids = imageMaterialAssetIds;
+      }
       if (imageMaterialUrls.trim()) {
         body.image_material_urls = imageMaterialUrls
           .split("\n")
@@ -186,8 +261,48 @@ export function VideoGenForm() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">参考图片 URL</label>
-          <span className="form-hint">每行一个 URL（可选）</span>
+          <label className="form-label">参考图片</label>
+          <span className="form-hint">支持 URL / 素材库选择 / 本地上传（可选）</span>
+          <div className="form-actions" style={{ paddingTop: 0, flexWrap: "wrap" }}>
+            <button
+              className="btn btn-sm btn-secondary"
+              type="button"
+              onClick={openAssetPicker}
+              disabled={uploadingRefs}
+            >
+              从素材库选择
+            </button>
+            <label className="btn btn-sm btn-secondary" style={{ position: "relative", overflow: "hidden" }}>
+              {uploadingRefs ? "上传中..." : "上传图片"}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => void handleUploadRefs(e.target.files)}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  opacity: 0,
+                  cursor: "pointer",
+                }}
+                disabled={uploadingRefs}
+              />
+            </label>
+            <span style={{ color: "var(--muted)", fontSize: "0.88rem" }}>
+              已选 {imageMaterialAssetIds.length} 张
+            </span>
+            {imageMaterialAssetIds.length > 0 && (
+              <button
+                className="btn btn-sm btn-secondary"
+                type="button"
+                onClick={() => setImageMaterialAssetIds([])}
+                disabled={uploadingRefs}
+              >
+                清空选择
+              </button>
+            )}
+          </div>
+
           <textarea
             className="form-textarea"
             value={imageMaterialUrls}
@@ -195,6 +310,35 @@ export function VideoGenForm() {
             placeholder="https://example.com/ref1.jpg&#10;https://example.com/ref2.jpg"
             rows={3}
           />
+          {selectedImageAssets.length > 0 && (
+            <div className="asset-gallery" style={{ marginTop: 12 }}>
+              {selectedImageAssets.slice(0, 6).map((asset) => {
+                const src = asset.content_url
+                  ? asset.content_url
+                  : asset.content_base64
+                    ? `data:${asset.mime_type ?? "image/png"};base64,${asset.content_base64}`
+                    : null;
+                return (
+                  <article
+                    key={asset.asset_id}
+                    className="asset-card"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => toggleImageAsset(asset.asset_id)}
+                    title="点击取消选择"
+                  >
+                    {src ? <img className="asset-thumb" src={src} alt={asset.name} /> : null}
+                    <div className="asset-info">
+                      <h4 style={{ fontSize: "0.95rem" }}>{asset.name}</h4>
+                      <div className="asset-info-meta">
+                        <span className="tag-pill">已选</span>
+                        <span className="tag-pill">{asset.category}</span>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="form-group">
@@ -336,6 +480,69 @@ export function VideoGenForm() {
               controls
               poster={preview.poster ?? undefined}
             />
+          </div>
+        </div>
+      )}
+
+      {assetPickerOpen && (
+        <div
+          className="dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setAssetPickerOpen(false)}
+        >
+          <div className="dialog-panel asset-detail-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="media-preview-header">
+              <h2 style={{ margin: 0 }}>选择参考图片</h2>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={() => setAssetPickerOpen(false)}>
+                关闭
+              </button>
+            </div>
+            {assetPickerError && <div className="error-banner" style={{ marginTop: 16 }}>{assetPickerError}</div>}
+            {assetPickerLoading ? (
+              <div className="gen-empty">
+                <span className="spinner spinner-dark" />
+                <p>正在加载素材...</p>
+              </div>
+            ) : imageAssets.length === 0 ? (
+              <div className="gen-empty">
+                <p>素材库中还没有图片素材</p>
+              </div>
+            ) : (
+              <div className="asset-gallery" style={{ marginTop: 16 }}>
+                {imageAssets.map((asset) => {
+                  const src = asset.content_url
+                    ? asset.content_url
+                    : asset.content_base64
+                      ? `data:${asset.mime_type ?? "image/png"};base64,${asset.content_base64}`
+                      : null;
+                  const selected = imageMaterialAssetIds.includes(asset.asset_id);
+                  return (
+                    <article
+                      key={asset.asset_id}
+                      className="asset-card"
+                      style={{ outline: selected ? "2px solid var(--accent)" : undefined }}
+                      onClick={() => toggleImageAsset(asset.asset_id)}
+                    >
+                      {src ? <img className="asset-thumb" src={src} alt={asset.name} /> : null}
+                      <div className="asset-info">
+                        <h4>{asset.name}</h4>
+                        <div className="asset-info-meta">
+                          <span className="tag-pill">{selected ? "已选" : "点击选择"}</span>
+                          <span className="tag-pill">{asset.origin === "manual" ? "手动" : "生成"}</span>
+                          {asset.category && <span className="tag-pill">{asset.category}</span>}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+            <div className="form-actions" style={{ marginTop: 16 }}>
+              <button className="btn btn-primary" type="button" onClick={() => setAssetPickerOpen(false)}>
+                确认（已选 {imageMaterialAssetIds.length} 张）
+              </button>
+            </div>
           </div>
         </div>
       )}

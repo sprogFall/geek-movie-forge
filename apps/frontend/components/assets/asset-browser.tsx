@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { listAssets } from "@/lib/api";
 import type { AssetResponse, AssetType, AssetOrigin } from "@/types/api";
+import { AssetDetailDialog } from "@/components/assets/asset-detail-dialog";
 
 export function AssetBrowser() {
   const [assets, setAssets] = useState<AssetResponse[]>([]);
@@ -10,6 +11,7 @@ export function AssetBrowser() {
   const [error, setError] = useState("");
   const [typeFilter, setTypeFilter] = useState<AssetType | "">("");
   const [originFilter, setOriginFilter] = useState<AssetOrigin | "">("");
+  const [activeAsset, setActiveAsset] = useState<AssetResponse | null>(null);
 
   async function load() {
     setLoading(true);
@@ -130,7 +132,16 @@ export function AssetBrowser() {
       ) : (
         <div className="asset-gallery">
           {assets.map((asset) => (
-            <article key={asset.asset_id} className="asset-card">
+            <article
+              key={asset.asset_id}
+              className="asset-card"
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveAsset(asset)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setActiveAsset(asset);
+              }}
+            >
               {renderThumb(asset)}
               <div className="asset-info">
                 <h4>{asset.name}</h4>
@@ -138,11 +149,29 @@ export function AssetBrowser() {
                   <span className="tag-pill">{typeLabels[asset.asset_type]}</span>
                   <span className="tag-pill">{originLabels[asset.origin]}</span>
                   {asset.category && <span className="tag-pill">{asset.category}</span>}
+                  {asset.tags?.length ? (
+                    <span className="tag-pill">{asset.tags.slice(0, 2).join(", ")}{asset.tags.length > 2 ? "…" : ""}</span>
+                  ) : null}
                 </div>
               </div>
             </article>
           ))}
         </div>
+      )}
+
+      {activeAsset && (
+        <AssetDetailDialog
+          asset={activeAsset}
+          onClose={() => setActiveAsset(null)}
+          onUpdated={(next) => {
+            setAssets((prev) => prev.map((a) => (a.asset_id === next.asset_id ? next : a)));
+            setActiveAsset(next);
+          }}
+          onDeleted={(assetId) => {
+            setAssets((prev) => prev.filter((a) => a.asset_id !== assetId));
+            setActiveAsset(null);
+          }}
+        />
       )}
     </div>
   );

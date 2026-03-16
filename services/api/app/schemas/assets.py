@@ -1,3 +1,8 @@
-from packages.shared.contracts.assets import AssetCreateRequest, AssetListResponse, AssetResponse
+from packages.shared.contracts.assets import (
+    AssetCreateRequest,
+    AssetListResponse,
+    AssetResponse,
+    AssetUpdateRequest,
+)
 
-__all__ = ["AssetCreateRequest", "AssetListResponse", "AssetResponse"]
+__all__ = ["AssetCreateRequest", "AssetListResponse", "AssetResponse", "AssetUpdateRequest"]

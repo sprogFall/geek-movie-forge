@@ -85,6 +85,44 @@ class InMemoryAssetService:
             raise NotFoundServiceError("Asset not found")
         return asset
 
+    def update_asset(
+        self,
+        owner_id: str,
+        asset_id: str,
+        *,
+        tags: list[str] | None = None,
+        content_text: str | None = None,
+    ) -> AssetResponse:
+        asset = self.require_asset(owner_id, asset_id)
+        if content_text is not None and asset.asset_type != AssetType.TEXT:
+            raise ValueError("Only text assets can update content_text")
+
+        updated = AssetResponse(
+            asset_id=asset.asset_id,
+            asset_type=asset.asset_type,
+            category=asset.category,
+            name=asset.name,
+            origin=asset.origin,
+            content_url=asset.content_url,
+            content_text=content_text if content_text is not None else asset.content_text,
+            content_base64=asset.content_base64,
+            mime_type=asset.mime_type,
+            tags=tags if tags is not None else asset.tags,
+            metadata=asset.metadata,
+            provider_id=asset.provider_id,
+            model=asset.model,
+            created_at=asset.created_at,
+        )
+        self._assets[asset_id] = updated
+        self._persist()
+        return updated
+
+    def delete_asset(self, owner_id: str, asset_id: str) -> None:
+        asset = self.require_asset(owner_id, asset_id)
+        del self._assets[asset.asset_id]
+        self._asset_owners.pop(asset.asset_id, None)
+        self._persist()
+
     def _persist(self) -> None:
         if self._store is None:
             return

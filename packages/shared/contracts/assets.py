@@ -50,3 +50,10 @@ class AssetResponse(BaseModel):
 
 class AssetListResponse(BaseModel):
     items: list[AssetResponse]
+
+
+class AssetUpdateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    tags: list[str] | None = None
+    content_text: str | None = None

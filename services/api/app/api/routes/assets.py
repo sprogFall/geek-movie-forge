@@ -1,11 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from packages.shared.contracts.auth import UserResponse
 from packages.shared.enums.asset_origin import AssetOrigin
 from packages.shared.enums.asset_type import AssetType
 from services.api.app.dependencies.auth import get_current_user
 from services.api.app.dependencies.services import get_asset_service
-from services.api.app.schemas.assets import AssetCreateRequest, AssetListResponse, AssetResponse
+from services.api.app.schemas.assets import (
+    AssetCreateRequest,
+    AssetListResponse,
+    AssetResponse,
+    AssetUpdateRequest,
+)
 from services.api.app.services.asset_service import InMemoryAssetService
 
 router = APIRouter(prefix="/api/v1/assets", tags=["assets"])
@@ -49,3 +54,37 @@ async def get_asset(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
     return asset
+
+
+@router.put("/{asset_id}", response_model=AssetResponse)
+async def update_asset(
+    asset_id: str,
+    payload: AssetUpdateRequest,
+    current_user: UserResponse = Depends(get_current_user),
+    asset_service: InMemoryAssetService = Depends(get_asset_service),
+) -> AssetResponse:
+    asset = asset_service.get_asset(current_user.user_id, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    try:
+        return asset_service.update_asset(
+            current_user.user_id,
+            asset_id,
+            tags=payload.tags,
+            content_text=payload.content_text,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
+
+
+@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_asset(
+    asset_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    asset_service: InMemoryAssetService = Depends(get_asset_service),
+) -> Response:
+    asset = asset_service.get_asset(current_user.user_id, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    asset_service.delete_asset(current_user.user_id, asset_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

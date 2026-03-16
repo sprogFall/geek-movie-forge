@@ -178,6 +178,17 @@ export function createAsset(body: Record<string, unknown>, params?: Record<strin
   });
 }
 
+export function updateAsset(id: string, body: Record<string, unknown>) {
+  return request<AssetResponse>(`/api/v1/assets/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteAsset(id: string) {
+  return request<void>(`/api/v1/assets/${id}`, { method: "DELETE" });
+}
+
 /* ── Generations ── */
 
 export function generateImages(body: Record<string, unknown>) {
