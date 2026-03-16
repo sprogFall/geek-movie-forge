@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
 import { navigationSections } from "@/lib/navigation";
@@ -17,10 +17,56 @@ type AppShellProps = {
 export function AppShell({ eyebrow, title, description, children }: AppShellProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const SIDEBAR_COLLAPSED_KEY = "gmf_sidebar:collapsed";
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      setSidebarCollapsed(raw === "1");
+    } catch {
+      setSidebarCollapsed(false);
+    }
+  }, []);
+
+  function toggleSidebar() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
+    <div className={`shell${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
+      <aside className={`sidebar${sidebarCollapsed ? " is-collapsed" : ""}`}>
+        <button
+          className="sidebar-toggle"
+          type="button"
+          onClick={toggleSidebar}
+          aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            {sidebarCollapsed ? (
+              <>
+                <path d="M9 6l6 6-6 6" />
+                <path d="M4 4h2v16H4z" />
+              </>
+            ) : (
+              <>
+                <path d="M15 6l-6 6 6 6" />
+                <path d="M18 4h2v16h-2z" />
+              </>
+            )}
+          </svg>
+          <span className="sidebar-toggle-label">{sidebarCollapsed ? "展开" : "收起"}</span>
+        </button>
+
         <div className="brand-mark">
           <span className="brand-orb" />
           <div className="brand-copy">
@@ -43,6 +89,8 @@ export function AppShell({ eyebrow, title, description, children }: AppShellProp
                     key={item.href}
                     href={item.href}
                     className={`nav-link${isActive ? " is-active" : ""}`}
+                    data-short={item.label.slice(0, 1)}
+                    title={item.label}
                   >
                     <strong>{item.label}</strong>
                     <span>{item.description}</span>

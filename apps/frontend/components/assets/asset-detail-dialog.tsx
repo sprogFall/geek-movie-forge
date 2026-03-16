@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { deleteAsset, updateAsset } from "@/lib/api";
 import type { AssetResponse } from "@/types/api";
+import { useToast } from "@/components/ui/toast-provider";
 
 type Props = {
   asset: AssetResponse;
@@ -36,6 +37,7 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
+  const toast = useToast();
 
   const canEditText = asset.asset_type === "text";
 
@@ -58,8 +60,11 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
       if (canEditText) body.content_text = contentText;
       const updated = await updateAsset(asset.asset_id, body);
       onUpdated(updated);
+      toast.success("保存成功", "素材已更新");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存失败");
+      const msg = err instanceof Error ? err.message : "保存失败";
+      setError(msg);
+      toast.error("保存失败", msg);
     } finally {
       setSaving(false);
     }
@@ -72,15 +77,18 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
     try {
       await deleteAsset(asset.asset_id);
       onDeleted(asset.asset_id);
+      toast.success("删除成功", "素材已移除");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "删除失败");
+      const msg = err instanceof Error ? err.message : "删除失败";
+      setError(msg);
+      toast.error("删除失败", msg);
       setDeleting(false);
     }
   }
 
   return (
-    <div className="dialog-overlay" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="dialog-panel asset-detail-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="dialog-overlay" role="dialog" aria-modal="true">
+      <div className="dialog-panel asset-detail-panel">
         <div className="media-preview-header">
           <div>
             <h2 style={{ marginBottom: 6 }}>{asset.name}</h2>
@@ -110,16 +118,23 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
                 className={`btn btn-sm ${mode === "preview" ? "btn-primary" : "btn-secondary"}`}
                 type="button"
                 onClick={() => setMode("preview")}
+                disabled={mode === "preview"}
+                aria-disabled={mode === "preview"}
               >
-                Markdown 预览
+                {mode === "preview" ? "预览中" : "Markdown 预览"}
               </button>
               <button
                 className={`btn btn-sm ${mode === "edit" ? "btn-primary" : "btn-secondary"}`}
                 type="button"
                 onClick={() => setMode("edit")}
+                disabled={mode === "edit"}
+                aria-disabled={mode === "edit"}
               >
-                编辑
+                {mode === "edit" ? "编辑中" : "编辑"}
               </button>
+              <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "0.88rem" }}>
+                当前模式：{mode === "preview" ? "预览" : "编辑"}
+              </span>
             </div>
             {mode === "preview" ? (
               <div className="markdown-preview">
