@@ -1240,13 +1240,12 @@ select {
 
 .markdown-preview :where(table) {
   width: 100%;
-  display: block;
-  overflow-x: auto;
   border-collapse: collapse;
   border-spacing: 0;
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.7);
+  font-size: 0.95rem;
 }
 
 .markdown-preview :where(th, td) {
@@ -1255,12 +1254,14 @@ select {
   vertical-align: top;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   border-right: 1px solid rgba(0, 0, 0, 0.08);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .markdown-preview :where(th) {
-  font-weight: 800;
+  font-weight: 700;
   background: rgba(0, 0, 0, 0.035);
+  white-space: nowrap;
 }
 
 .markdown-preview :where(tr:last-child td) {
@@ -1269,6 +1270,10 @@ select {
 
 .markdown-preview :where(td:last-child, th:last-child) {
   border-right: 0;
+}
+
+.markdown-preview :where(td:first-child) {
+  white-space: nowrap;
 }
 
 /* ── Responsive ── */
