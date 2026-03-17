@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 from uuid import uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -33,6 +33,25 @@ def _get_header(headers: list[tuple[bytes, bytes]], name: bytes) -> str | None:
             except Exception:
                 return None
     return None
+
+
+def _set_header(
+    headers: list[tuple[bytes, bytes]], *, name: bytes, value: bytes
+) -> list[tuple[bytes, bytes]]:
+    target = name.lower()
+    return [(key, val) for key, val in headers if key.lower() != target] + [(name, value)]
+
+
+def _normalize_request_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+    normalized = "".join(ch for ch in trimmed if ch.isalnum() or ch in ("-", "_"))
+    if not normalized:
+        return None
+    return normalized[:64]
 
 
 def _decode_utf8(data: bytes) -> str:
@@ -89,6 +108,39 @@ def _json_preview(
     return _sanitize_json(data, max_string_len=max_string_len, max_items=max_items)
 
 
+def _safe_query_string(
+    query_params: dict[str, list[str]], *, max_string_len: int, max_items: int
+) -> str:
+    sanitized = _sanitize_json(query_params, max_string_len=max_string_len, max_items=max_items)
+    if not isinstance(sanitized, dict):
+        return ""
+    try:
+        return urlencode(sanitized, doseq=True)
+    except Exception:
+        return ""
+
+
+def _headers_preview(
+    headers: list[tuple[bytes, bytes]],
+    *,
+    allowlist: set[bytes],
+    max_string_len: int,
+) -> dict[str, str]:
+    allow = {item.lower() for item in allowlist}
+    merged: dict[str, str] = {}
+    for key, value in headers:
+        key_lower = key.lower()
+        if key_lower not in allow:
+            continue
+        key_str = _decode_utf8(key_lower)
+        value_str = _truncate_string(_decode_utf8(value), limit=max_string_len)
+        if key_str in merged:
+            merged[key_str] = f"{merged[key_str]}, {value_str}"
+        else:
+            merged[key_str] = value_str
+    return merged
+
+
 class _RequestBodyTooLarge(Exception):
     pass
 
@@ -123,15 +175,39 @@ class ApiLoggingMiddleware:
             await self._app(scope, receive, send)
             return
 
-        request_id = uuid4().hex[:12]
+        request_headers = scope.get("headers") or []
+        incoming_request_id = _normalize_request_id(_get_header(request_headers, b"x-request-id"))
+        request_id = incoming_request_id or uuid4().hex[:12]
         start = time.monotonic()
 
-        request_headers = scope.get("headers") or []
         method = scope.get("method") or ""
         query_string = _decode_utf8(scope.get("query_string") or b"")
         query_params = parse_qs(query_string, keep_blank_values=True) if query_string else {}
+        safe_query_string = _safe_query_string(
+            query_params, max_string_len=self._max_string_len, max_items=self._max_items
+        )
         request_content_type = _get_header(request_headers, b"content-type") or ""
         user_agent = _get_header(request_headers, b"user-agent")
+        request_host = _get_header(request_headers, b"host")
+        request_scheme = scope.get("scheme") or "http"
+        request_url = (
+            f"{request_scheme}://{request_host}{path}" if request_host else path
+        ) + (f"?{safe_query_string}" if safe_query_string else "")
+
+        request_headers_preview = _headers_preview(
+            request_headers,
+            allowlist={
+                b"content-type",
+                b"content-length",
+                b"accept",
+                b"user-agent",
+                b"referer",
+                b"x-forwarded-for",
+                b"x-real-ip",
+                b"x-request-id",
+            },
+            max_string_len=self._max_string_len,
+        )
 
         request_body_preview = bytearray()
         request_body_len = 0
@@ -160,19 +236,33 @@ class ApiLoggingMiddleware:
 
         status_code: int | None = None
         response_content_type: str | None = None
+        response_headers_preview: dict[str, str] | None = None
         response_body_preview = bytearray()
         response_body_len = 0
 
         async def send_wrapper(message: Message) -> None:
             nonlocal status_code, response_content_type, response_body_len, response_started
+            nonlocal response_headers_preview
 
             if message["type"] == "http.response.start":
                 response_started = True
                 status_code = int(message["status"])
                 headers = list(message.get("headers") or [])
-                headers.append((b"x-request-id", request_id.encode("utf-8")))
+                headers = _set_header(
+                    headers, name=b"x-request-id", value=request_id.encode("utf-8")
+                )
                 message["headers"] = headers
                 response_content_type = _get_header(headers, b"content-type")
+                response_headers_preview = _headers_preview(
+                    headers,
+                    allowlist={
+                        b"content-type",
+                        b"content-length",
+                        b"cache-control",
+                        b"x-request-id",
+                    },
+                    max_string_len=self._max_string_len,
+                )
 
             if message["type"] == "http.response.body":
                 chunk = message.get("body", b"")
@@ -184,6 +274,7 @@ class ApiLoggingMiddleware:
                 if not message.get("more_body", False):
                     duration_ms = int((time.monotonic() - start) * 1000)
                     request_body_preview_truncated = request_body_len > len(request_body_preview)
+                    response_body_preview_truncated = response_body_len > len(response_body_preview)
                     request_json = (
                         _json_preview(
                             bytes(request_body_preview),
@@ -192,6 +283,15 @@ class ApiLoggingMiddleware:
                             max_items=self._max_items,
                         )
                         if "application/json" in request_content_type
+                        else None
+                    )
+                    request_form = (
+                        _sanitize_json(
+                            parse_qs(_decode_utf8(bytes(request_body_preview)), keep_blank_values=True),
+                            max_string_len=self._max_string_len,
+                            max_items=self._max_items,
+                        )
+                        if "application/x-www-form-urlencoded" in request_content_type
                         else None
                     )
                     response_json = (
@@ -205,10 +305,17 @@ class ApiLoggingMiddleware:
                         else None
                     )
 
+                    client_host: str | None = None
+                    client_port: int | None = None
+                    if isinstance(scope.get("client"), tuple) and len(scope["client"]) == 2:
+                        client_host = scope["client"][0]
+                        client_port = scope["client"][1]
+
                     log_payload = {
                         "request_id": request_id,
                         "method": method,
                         "path": path,
+                        "url": request_url,
                         "query": _sanitize_json(
                             query_params,
                             max_string_len=self._max_string_len,
@@ -218,24 +325,38 @@ class ApiLoggingMiddleware:
                         "duration_ms": duration_ms,
                         "request": {
                             "content_type": request_content_type,
+                            "headers": request_headers_preview,
                             "body_len": request_body_len,
                             "body_preview_truncated": request_body_preview_truncated,
                             "json": request_json,
+                            "form": request_form,
                         },
                         "response": {
                             "content_type": response_content_type,
+                            "headers": response_headers_preview,
                             "body_len": response_body_len,
+                            "body_preview_truncated": response_body_preview_truncated,
                             "json": response_json,
                         },
-                        "client": {"user_agent": user_agent},
+                        "client": {
+                            "host": client_host,
+                            "port": client_port,
+                            "user_agent": user_agent,
+                        },
                         "auth": {
                             "has_bearer_token": bool(_get_header(request_headers, b"authorization")),
                         },
                     }
                     if status_code is not None and status_code >= 400:
-                        logger.warning("api_call: %s", log_payload)
+                        logger.warning(
+                            "api_call: %s",
+                            json.dumps(log_payload, ensure_ascii=False, separators=(",", ":")),
+                        )
                     else:
-                        logger.info("api_call: %s", log_payload)
+                        logger.info(
+                            "api_call: %s",
+                            json.dumps(log_payload, ensure_ascii=False, separators=(",", ":")),
+                        )
 
             await send(message)
 
@@ -245,19 +366,24 @@ class ApiLoggingMiddleware:
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.warning(
                 "api_call_request_too_large: %s",
-                {
-                    "request_id": request_id,
-                    "method": method,
-                    "path": path,
-                    "query": _sanitize_json(
-                        query_params,
-                        max_string_len=self._max_string_len,
-                        max_items=self._max_items,
-                    ),
-                    "duration_ms": duration_ms,
-                    "request_body_len": request_body_len,
-                    "max_request_size_bytes": self._max_request_size_bytes,
-                },
+                json.dumps(
+                    {
+                        "request_id": request_id,
+                        "method": method,
+                        "path": path,
+                        "url": request_url,
+                        "query": _sanitize_json(
+                            query_params,
+                            max_string_len=self._max_string_len,
+                            max_items=self._max_items,
+                        ),
+                        "duration_ms": duration_ms,
+                        "request_body_len": request_body_len,
+                        "max_request_size_bytes": self._max_request_size_bytes,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
             )
             if response_started:
                 raise
@@ -274,21 +400,88 @@ class ApiLoggingMiddleware:
                     "more_body": False,
                 }
             )
-        except Exception:
+        except Exception as exc:
             duration_ms = int((time.monotonic() - start) * 1000)
+            request_body_preview_truncated = request_body_len > len(request_body_preview)
+            request_json = (
+                _json_preview(
+                    bytes(request_body_preview),
+                    max_bytes=self._max_request_body_bytes,
+                    max_string_len=self._max_string_len,
+                    max_items=self._max_items,
+                )
+                if "application/json" in request_content_type
+                else None
+            )
+            request_form = (
+                _sanitize_json(
+                    parse_qs(_decode_utf8(bytes(request_body_preview)), keep_blank_values=True),
+                    max_string_len=self._max_string_len,
+                    max_items=self._max_items,
+                )
+                if "application/x-www-form-urlencoded" in request_content_type
+                else None
+            )
+
+            client_host: str | None = None
+            client_port: int | None = None
+            if isinstance(scope.get("client"), tuple) and len(scope["client"]) == 2:
+                client_host = scope["client"][0]
+                client_port = scope["client"][1]
+
             logger.exception(
                 "api_call_unhandled_error: %s",
-                {
-                    "request_id": request_id,
-                    "method": method,
-                    "path": path,
-                    "query": _sanitize_json(
-                        query_params,
-                        max_string_len=self._max_string_len,
-                        max_items=self._max_items,
-                    ),
-                    "duration_ms": duration_ms,
-                    "request_body_len": request_body_len,
-                },
+                json.dumps(
+                    {
+                        "request_id": request_id,
+                        "method": method,
+                        "path": path,
+                        "url": request_url,
+                        "query": _sanitize_json(
+                            query_params,
+                            max_string_len=self._max_string_len,
+                            max_items=self._max_items,
+                        ),
+                        "duration_ms": duration_ms,
+                        "request": {
+                            "content_type": request_content_type,
+                            "headers": request_headers_preview,
+                            "body_len": request_body_len,
+                            "body_preview_truncated": request_body_preview_truncated,
+                            "json": request_json,
+                            "form": request_form,
+                        },
+                        "client": {
+                            "host": client_host,
+                            "port": client_port,
+                            "user_agent": user_agent,
+                        },
+                        "auth": {
+                            "has_bearer_token": bool(
+                                _get_header(request_headers, b"authorization")
+                            ),
+                        },
+                        "error": {
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                        },
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
             )
-            raise
+            if response_started:
+                raise
+
+            headers = [
+                (b"content-type", b"application/json"),
+                (b"x-request-id", request_id.encode("utf-8")),
+            ]
+            await send({"type": "http.response.start", "status": 500, "headers": headers})
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b'{"detail":"Internal server error"}',
+                    "more_body": False,
+                }
+            )
