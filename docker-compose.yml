@@ -7,7 +7,7 @@ services:
       dockerfile: ./infra/docker/web.Dockerfile
     container_name: gmf_web
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     env_file:
       - .env
     environment:
@@ -25,7 +25,7 @@ services:
     container_name: gmf_api
     command: ["uvicorn", "services.api.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     depends_on:
@@ -134,7 +134,7 @@ services:
       dockerfile: ./infra/docker/remotion.Dockerfile
     container_name: gmf_remotion
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     env_file:
       - .env
     healthcheck:
@@ -153,7 +153,7 @@ services:
       POSTGRES_USER: geek_movie
       POSTGRES_PASSWORD: geek_movie
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -168,7 +168,7 @@ services:
     image: redis:7-alpine
     container_name: gmf_redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -187,8 +187,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
     networks:
@@ -199,7 +199,7 @@ services:
     container_name: gmf_n8n
     profiles: ["automation"]
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     env_file:
       - .env
     volumes:

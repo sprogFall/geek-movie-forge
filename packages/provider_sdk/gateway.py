@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 import time
@@ -17,7 +18,7 @@ from packages.shared.contracts.generations import (
     VideoGenerationPayload,
 )
 from packages.shared.contracts.providers import ProviderEndpointConfig, ProviderRecord
-from services.api.app.services.errors import UpstreamServiceError
+from services.api.app.services.errors import UpstreamServiceError, ValidationServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,7 @@ class HttpProviderGateway:
         body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        _ensure_outbound_provider_url_is_allowed(url)
         request_headers = _build_request_headers(provider.api_key, headers)
         log_body = _env_flag("GMF_LOG_PROVIDER_BODY", default=False)
         start = time.monotonic()
@@ -350,6 +352,68 @@ def _env_flag(name: str, *, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _app_env() -> str:
+    return (os.getenv("APP_ENV") or "local").strip().lower()
+
+
+def _allow_private_provider_urls() -> bool:
+    return _env_flag(
+        "GMF_ALLOW_PRIVATE_PROVIDER_URLS",
+        default=_app_env() in ("local", "test"),
+    )
+
+
+def _allow_insecure_http_provider_urls() -> bool:
+    return _env_flag(
+        "GMF_ALLOW_INSECURE_HTTP_PROVIDER_URLS",
+        default=_app_env() in ("local", "test"),
+    )
+
+
+def _ensure_outbound_provider_url_is_allowed(url: str) -> None:
+    parsed = httpx.URL(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise ValidationServiceError("Provider URL must use http or https")
+    if scheme == "http" and not _allow_insecure_http_provider_urls():
+        raise ValidationServiceError(
+            "Insecure http provider URLs are disabled. Use https or set GMF_ALLOW_INSECURE_HTTP_PROVIDER_URLS=true"
+        )
+    if parsed.username or parsed.password:
+        raise ValidationServiceError("Provider URL must not contain username/password")
+
+    host = parsed.host
+    if not host:
+        raise ValidationServiceError("Provider URL is missing host")
+    normalized_host = host.strip().lower().rstrip(".")
+
+    allow_private = _allow_private_provider_urls()
+    if normalized_host in {"localhost"} or normalized_host.endswith(".localhost"):
+        if not allow_private:
+            raise ValidationServiceError(
+                "Provider URL points to localhost which is blocked. Set GMF_ALLOW_PRIVATE_PROVIDER_URLS=true to override"
+            )
+        return
+
+    try:
+        ip = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        return
+
+    if ip.is_link_local:
+        raise ValidationServiceError("Provider URL points to a link-local address which is not allowed")
+    if ip.is_multicast:
+        raise ValidationServiceError("Provider URL points to a multicast address which is not allowed")
+    if ip.is_unspecified:
+        raise ValidationServiceError("Provider URL points to an unspecified address which is not allowed")
+    if ip.is_reserved:
+        raise ValidationServiceError("Provider URL points to a reserved address which is not allowed")
+    if (ip.is_loopback or ip.is_private) and not allow_private:
+        raise ValidationServiceError(
+            "Provider URL points to a private/loopback address which is blocked. Set GMF_ALLOW_PRIVATE_PROVIDER_URLS=true to override"
+        )
 
 
 def _build_request_headers(

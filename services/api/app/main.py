@@ -62,13 +62,17 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.cors_allow_origins,
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.add_middleware(ApiLoggingMiddleware, skip_paths={"/api/v1/health"})
+app.add_middleware(
+    ApiLoggingMiddleware,
+    skip_paths={"/healthz"},
+    max_request_size_bytes=settings.api_max_request_bytes,
+)
 
 
 @app.exception_handler(ServiceError)

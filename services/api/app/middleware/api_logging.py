@@ -21,6 +21,8 @@ _SENSITIVE_KEYS = {
     "secret",
 }
 
+_DEFAULT_MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024  # 10 MiB
+
 
 def _get_header(headers: list[tuple[bytes, bytes]], name: bytes) -> str | None:
     target = name.lower()
@@ -87,6 +89,10 @@ def _json_preview(
     return _sanitize_json(data, max_string_len=max_string_len, max_items=max_items)
 
 
+class _RequestBodyTooLarge(Exception):
+    pass
+
+
 class ApiLoggingMiddleware:
     def __init__(
         self,
@@ -94,6 +100,7 @@ class ApiLoggingMiddleware:
         *,
         max_request_body_bytes: int = 16_384,
         max_response_body_bytes: int = 16_384,
+        max_request_size_bytes: int = _DEFAULT_MAX_REQUEST_SIZE_BYTES,
         max_string_len: int = 600,
         max_items: int = 60,
         skip_paths: set[str] | None = None,
@@ -101,6 +108,7 @@ class ApiLoggingMiddleware:
         self._app = app
         self._max_request_body_bytes = max_request_body_bytes
         self._max_response_body_bytes = max_response_body_bytes
+        self._max_request_size_bytes = max_request_size_bytes
         self._max_string_len = max_string_len
         self._max_items = max_items
         self._skip_paths = skip_paths or set()
@@ -125,26 +133,30 @@ class ApiLoggingMiddleware:
         request_content_type = _get_header(request_headers, b"content-type") or ""
         user_agent = _get_header(request_headers, b"user-agent")
 
-        body_chunks: list[bytes] = []
-        more_body = True
-        while more_body:
+        request_body_preview = bytearray()
+        request_body_len = 0
+        response_started = False
+
+        async def receive_wrapper() -> Message:
+            nonlocal request_body_len
             message = await receive()
             if message["type"] != "http.request":
-                continue
-            chunk = message.get("body", b"")
-            if chunk:
-                body_chunks.append(chunk)
-            more_body = bool(message.get("more_body", False))
-        request_body = b"".join(body_chunks)
+                return message
 
-        receive_done = False
+            chunk = message.get("body") or b""
+            request_body_len += len(chunk)
+            if (
+                chunk
+                and self._max_request_body_bytes > 0
+                and len(request_body_preview) < self._max_request_body_bytes
+            ):
+                remaining = self._max_request_body_bytes - len(request_body_preview)
+                request_body_preview.extend(chunk[:remaining])
 
-        async def receive_replay() -> Message:
-            nonlocal receive_done
-            if receive_done:
-                return {"type": "http.request", "body": b"", "more_body": False}
-            receive_done = True
-            return {"type": "http.request", "body": request_body, "more_body": False}
+            if self._max_request_size_bytes > 0 and request_body_len > self._max_request_size_bytes:
+                raise _RequestBodyTooLarge()
+
+            return message
 
         status_code: int | None = None
         response_content_type: str | None = None
@@ -152,9 +164,10 @@ class ApiLoggingMiddleware:
         response_body_len = 0
 
         async def send_wrapper(message: Message) -> None:
-            nonlocal status_code, response_content_type, response_body_len
+            nonlocal status_code, response_content_type, response_body_len, response_started
 
             if message["type"] == "http.response.start":
+                response_started = True
                 status_code = int(message["status"])
                 headers = list(message.get("headers") or [])
                 headers.append((b"x-request-id", request_id.encode("utf-8")))
@@ -170,9 +183,10 @@ class ApiLoggingMiddleware:
 
                 if not message.get("more_body", False):
                     duration_ms = int((time.monotonic() - start) * 1000)
+                    request_body_preview_truncated = request_body_len > len(request_body_preview)
                     request_json = (
                         _json_preview(
-                            request_body,
+                            bytes(request_body_preview),
                             max_bytes=self._max_request_body_bytes,
                             max_string_len=self._max_string_len,
                             max_items=self._max_items,
@@ -195,12 +209,17 @@ class ApiLoggingMiddleware:
                         "request_id": request_id,
                         "method": method,
                         "path": path,
-                        "query": query_params,
+                        "query": _sanitize_json(
+                            query_params,
+                            max_string_len=self._max_string_len,
+                            max_items=self._max_items,
+                        ),
                         "status_code": status_code,
                         "duration_ms": duration_ms,
                         "request": {
                             "content_type": request_content_type,
-                            "body_len": len(request_body),
+                            "body_len": request_body_len,
+                            "body_preview_truncated": request_body_preview_truncated,
                             "json": request_json,
                         },
                         "response": {
@@ -221,7 +240,40 @@ class ApiLoggingMiddleware:
             await send(message)
 
         try:
-            await self._app(scope, receive_replay, send_wrapper)
+            await self._app(scope, receive_wrapper, send_wrapper)
+        except _RequestBodyTooLarge:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            logger.warning(
+                "api_call_request_too_large: %s",
+                {
+                    "request_id": request_id,
+                    "method": method,
+                    "path": path,
+                    "query": _sanitize_json(
+                        query_params,
+                        max_string_len=self._max_string_len,
+                        max_items=self._max_items,
+                    ),
+                    "duration_ms": duration_ms,
+                    "request_body_len": request_body_len,
+                    "max_request_size_bytes": self._max_request_size_bytes,
+                },
+            )
+            if response_started:
+                raise
+
+            headers = [
+                (b"content-type", b"application/json"),
+                (b"x-request-id", request_id.encode("utf-8")),
+            ]
+            await send({"type": "http.response.start", "status": 413, "headers": headers})
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b'{"detail":"Request body too large"}',
+                    "more_body": False,
+                }
+            )
         except Exception:
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.exception(
@@ -230,10 +282,13 @@ class ApiLoggingMiddleware:
                     "request_id": request_id,
                     "method": method,
                     "path": path,
-                    "query": query_params,
+                    "query": _sanitize_json(
+                        query_params,
+                        max_string_len=self._max_string_len,
+                        max_items=self._max_items,
+                    ),
                     "duration_ms": duration_ms,
-                    "request_body_len": len(request_body),
+                    "request_body_len": request_body_len,
                 },
             )
             raise
-

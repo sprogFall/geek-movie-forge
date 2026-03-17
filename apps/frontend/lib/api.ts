@@ -15,7 +15,10 @@ import type {
   CallLogResponse,
 } from "@/types/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
 
 const TOKEN_KEY = "gmf_token";
 const USER_KEY = "gmf_user";
