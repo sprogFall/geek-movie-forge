@@ -14,6 +14,7 @@ from packages.shared.contracts.generations import (
     TextGenerationPayload,
     TextGenerationRequest,
     TextGenerationResponse,
+    VideoInputMaterial,
     VideoGenerationPayload,
     VideoGenerationRequest,
 )
@@ -102,16 +103,22 @@ class GenerationService:
             payload.model,
             ModelCapability.VIDEO,
         )
-        image_urls, image_base64 = self._resolve_image_materials(
+        image_materials = self._resolve_image_materials(
             owner_id,
             payload.image_material_asset_ids,
         )
-        image_urls.extend(payload.image_material_urls)
+        image_materials.extend(
+            VideoInputMaterial(kind="url", value=value)
+            for value in payload.image_material_urls
+        )
+        image_urls = [item.value for item in image_materials if item.kind == "url"]
+        image_base64 = [item.value for item in image_materials if item.kind == "base64"]
         scene_prompt_texts = self._resolve_scene_prompt_materials(
             owner_id,
             payload.scene_prompt_asset_ids,
         )
         scene_prompt_texts.extend(payload.scene_prompt_texts)
+        resolved_prompt = _merge_prompt(payload.preset_prompt, payload.prompt) or None
 
         gateway_payload = VideoGenerationPayload(
             provider_id=payload.provider_id,
@@ -119,7 +126,8 @@ class GenerationService:
             count=payload.count,
             prompt=payload.prompt,
             preset_prompt=payload.preset_prompt,
-            resolved_prompt=_merge_prompt(payload.preset_prompt, payload.prompt),
+            resolved_prompt=resolved_prompt,
+            image_materials=image_materials,
             image_material_urls=image_urls,
             image_material_base64=image_base64,
             scene_prompt_texts=scene_prompt_texts,
@@ -149,7 +157,7 @@ class GenerationService:
             capability=ModelCapability.VIDEO,
             provider_id=payload.provider_id,
             model=payload.model,
-            resolved_prompt=gateway_payload.resolved_prompt,
+            resolved_prompt=gateway_payload.resolved_prompt or "",
             provider_request_id=provider_result.provider_request_id,
             outputs=provider_result.outputs,
             saved_assets=saved_assets,
@@ -335,21 +343,28 @@ class GenerationService:
         self,
         owner_id: str,
         asset_ids: list[str],
-    ) -> tuple[list[str], list[str]]:
-        image_urls: list[str] = []
-        image_base64: list[str] = []
+    ) -> list[VideoInputMaterial]:
+        materials: list[VideoInputMaterial] = []
         for asset_id in asset_ids:
             asset = self._asset_service.require_asset(owner_id, asset_id)
             if asset.asset_type != AssetType.IMAGE:
                 raise ValidationServiceError("Image material asset must be image type")
             if asset.content_url is not None:
-                image_urls.append(str(asset.content_url))
+                materials.append(VideoInputMaterial(kind="url", value=str(asset.content_url)))
                 continue
             if asset.content_base64 is not None:
-                image_base64.append(asset.content_base64)
+                materials.append(
+                    VideoInputMaterial(
+                        kind="base64",
+                        value=_normalize_image_data_uri(
+                            asset.content_base64,
+                            asset.mime_type,
+                        ),
+                    )
+                )
                 continue
             raise ValidationServiceError("Image material asset has no usable content")
-        return image_urls, image_base64
+        return materials
 
     def _resolve_scene_prompt_materials(
         self,
@@ -437,3 +452,10 @@ def _preview_text(text: str | None, *, limit: int = 200) -> str | None:
     if len(value) <= limit:
         return value
     return f"{value[:limit]}..."
+
+
+def _normalize_image_data_uri(value: str, mime_type: str | None) -> str:
+    normalized = value.strip()
+    if normalized.startswith("data:"):
+        return normalized
+    return f"data:{mime_type or 'image/png'};base64,{normalized}"

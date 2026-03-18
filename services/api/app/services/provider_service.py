@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -24,8 +25,25 @@ _NAMESPACE = "providers"
 
 _BUILTIN_PROVIDER_DEFS = (
     {
+        "key": "volcengine_ark",
+        "name": "Volcengine Ark",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "adapter_type": "volcengine_ark",
+        "api_key_env": "VOLCENGINE_ARK_API_KEY",
+        "models": [
+            ProviderModelConfig(
+                model="doubao-seedance-1-5-pro-251215",
+                capabilities=[ModelCapability.VIDEO],
+                label="Seedance 1.5 Pro",
+            ),
+        ],
+        "routes": {
+            "video": {"path": "/contents/generations/tasks", "timeout_seconds": 300.0},
+        },
+    },
+    {
         "key": "modelscope",
-        "name": "魔搭 ModelScope",
+        "name": "ModelScope",
         "base_url": "https://api-inference.modelscope.cn",
         "adapter_type": "modelscope",
         "models": [
@@ -126,7 +144,7 @@ class InMemoryProviderService:
         provider = self._providers.get(provider_id)
         if provider is None or provider.owner_id != owner_id:
             return None
-        return provider.to_response() if provider else None
+        return provider.to_response()
 
     def require_provider_record(self, owner_id: str, provider_id: str) -> ProviderRecord:
         self._ensure_builtin_providers(owner_id)
@@ -185,7 +203,7 @@ class InMemoryProviderService:
                 owner_id=owner_id,
                 name=item["name"],
                 base_url=item["base_url"],
-                api_key="",
+                api_key=_builtin_api_key(item),
                 adapter_type=item["adapter_type"],
                 models=item["models"],
                 routes=item["routes"],
@@ -200,7 +218,7 @@ class InMemoryProviderService:
     def _persist(self) -> None:
         if self._store is None:
             return
-        data = {k: v.model_dump(mode="json") for k, v in self._providers.items()}
+        data = {key: value.model_dump(mode="json") for key, value in self._providers.items()}
         self._store.save(_NAMESPACE, data)
 
     def _load(self) -> None:
@@ -213,10 +231,15 @@ class InMemoryProviderService:
             try:
                 self._providers[key] = ProviderRecord(**value)
             except Exception:
-                logging.getLogger(__name__).warning(
-                    "Skipping corrupt provider entry %s", key
-                )
+                logging.getLogger(__name__).warning("Skipping corrupt provider entry %s", key)
 
 
 def _builtin_provider_id(owner_id: str, key: str) -> str:
     return f"provider_builtin_{key}_{owner_id}"
+
+
+def _builtin_api_key(item: dict) -> str:
+    env_name = item.get("api_key_env")
+    if not env_name:
+        return ""
+    return os.getenv(env_name, "").strip()

@@ -53,7 +53,7 @@ class FakeProviderGateway(ProviderGateway):
         self.last_text_payload = {"provider": provider, "payload": payload}
         return ProviderTextGenerationResult(
             provider_request_id="txt_req_001",
-            output_text="镜头一：飞船掠过暴雨中的城市，旁白压低语气揭开危机。",
+            output_text="Opening shot: the ship cuts through the storm.",
         )
 
 
@@ -94,8 +94,8 @@ def test_generate_image_and_save_assets() -> None:
                 "provider_id": provider_id,
                 "model": "forge-image-v1",
                 "count": 2,
-                "prompt": "赛博朋克雨夜街道",
-                "preset_prompt": "电影海报风格",
+                "prompt": "A neon city street at night",
+                "preset_prompt": "Movie poster composition",
                 "save": {
                     "enabled": True,
                     "category": "storyboard",
@@ -107,7 +107,9 @@ def test_generate_image_and_save_assets() -> None:
             headers=headers,
         )
         list_assets_response = client.get(
-            "/api/v1/assets", params={"asset_type": "image"}, headers=headers
+            "/api/v1/assets",
+            params={"asset_type": "image"},
+            headers=headers,
         )
 
     assert response.status_code == 200
@@ -117,12 +119,15 @@ def test_generate_image_and_save_assets() -> None:
     assert len(body["saved_assets"]) == 2
     assert body["saved_assets"][0]["category"] == "storyboard"
     assert fake_gateway.last_image_payload is not None
-    assert fake_gateway.last_image_payload["payload"].resolved_prompt == "电影海报风格\n赛博朋克雨夜街道"
+    assert (
+        fake_gateway.last_image_payload["payload"].resolved_prompt
+        == "Movie poster composition\nA neon city street at night"
+    )
     assert list_assets_response.status_code == 200
     assert len(list_assets_response.json()["items"]) == 2
 
 
-def test_generate_video_with_asset_materials() -> None:
+def test_generate_video_with_asset_materials_preserves_order() -> None:
     fake_gateway = FakeProviderGateway()
 
     with TestClient(app) as client:
@@ -134,23 +139,34 @@ def test_generate_video_with_asset_materials() -> None:
         )
         provider_id = _create_provider(client, headers)
 
-        image_asset_response = client.post(
+        first_frame_asset = client.post(
             "/api/v1/assets",
             json={
                 "asset_type": "image",
                 "category": "reference",
-                "name": "city-reference",
-                "content_url": "https://cdn.example.com/assets/city.png",
+                "name": "frame-1",
+                "content_base64": "ZmFrZS1pbWFnZS0x",
+                "mime_type": "image/png",
             },
             headers=headers,
         )
-        prompt_asset_response = client.post(
+        last_frame_asset = client.post(
+            "/api/v1/assets",
+            json={
+                "asset_type": "image",
+                "category": "reference",
+                "name": "frame-2",
+                "content_url": "https://cdn.example.com/assets/frame-2.png",
+            },
+            headers=headers,
+        )
+        prompt_asset = client.post(
             "/api/v1/assets",
             json={
                 "asset_type": "text",
                 "category": "reference",
-                "name": "rain-scene",
-                "content_text": "暴雨、霓虹、追逐、低机位镜头",
+                "name": "scene",
+                "content_text": "Heavy rain, low angle tracking shot, distant explosion.",
             },
             headers=headers,
         )
@@ -161,10 +177,13 @@ def test_generate_video_with_asset_materials() -> None:
                 "provider_id": provider_id,
                 "model": "forge-video-v1",
                 "count": 1,
-                "prompt": "主角回头看向爆炸中心",
-                "preset_prompt": "电影预告片镜头",
-                "image_material_asset_ids": [image_asset_response.json()["asset_id"]],
-                "scene_prompt_asset_ids": [prompt_asset_response.json()["asset_id"]],
+                "prompt": "The hero turns back toward the fire.",
+                "preset_prompt": "Trailer style",
+                "image_material_asset_ids": [
+                    first_frame_asset.json()["asset_id"],
+                    last_frame_asset.json()["asset_id"],
+                ],
+                "scene_prompt_asset_ids": [prompt_asset.json()["asset_id"]],
                 "save": {
                     "enabled": True,
                     "category": "shots",
@@ -180,11 +199,59 @@ def test_generate_video_with_asset_materials() -> None:
     assert body["outputs"][0]["url"] == "https://cdn.example.com/generated/video-1.mp4"
     assert body["saved_assets"][0]["asset_type"] == "video"
     assert fake_gateway.last_video_payload is not None
-    assert fake_gateway.last_video_payload["payload"].image_material_urls == [
-        "https://cdn.example.com/assets/city.png"
+    payload = fake_gateway.last_video_payload["payload"]
+    assert [item.kind for item in payload.image_materials] == ["base64", "url"]
+    assert payload.image_materials[0].value == "data:image/png;base64,ZmFrZS1pbWFnZS0x"
+    assert payload.image_materials[1].value == "https://cdn.example.com/assets/frame-2.png"
+    assert payload.image_material_urls == ["https://cdn.example.com/assets/frame-2.png"]
+    assert payload.image_material_base64 == ["data:image/png;base64,ZmFrZS1pbWFnZS0x"]
+    assert payload.scene_prompt_texts == [
+        "Heavy rain, low angle tracking shot, distant explosion."
     ]
-    assert fake_gateway.last_video_payload["payload"].scene_prompt_texts == [
-        "暴雨、霓虹、追逐、低机位镜头"
+
+
+def test_generate_video_allows_image_only_request() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, headers)
+
+        image_asset = client.post(
+            "/api/v1/assets",
+            json={
+                "asset_type": "image",
+                "category": "reference",
+                "name": "frame-1",
+                "content_url": "https://cdn.example.com/assets/frame-1.png",
+            },
+            headers=headers,
+        )
+
+        response = client.post(
+            "/api/v1/generations/videos",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "count": 1,
+                "image_material_asset_ids": [image_asset.json()["asset_id"]],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["resolved_prompt"] == ""
+    assert fake_gateway.last_video_payload is not None
+    payload = fake_gateway.last_video_payload["payload"]
+    assert payload.resolved_prompt is None
+    assert [item.value for item in payload.image_materials] == [
+        "https://cdn.example.com/assets/frame-1.png"
     ]
 
 
@@ -206,9 +273,9 @@ def test_generate_text_and_query_saved_materials() -> None:
                 "provider_id": provider_id,
                 "model": "forge-text-v1",
                 "task_type": "script_writing",
-                "source_text": "一名船长降落在失联星球。",
-                "prompt": "写成 60 秒预告片脚本",
-                "preset_prompt": "节奏紧张，适合短视频",
+                "source_text": "A pilot crash-lands on an abandoned moon.",
+                "prompt": "Write a 60-second trailer script",
+                "preset_prompt": "Tense pacing for a short cinematic teaser",
                 "save": {
                     "enabled": True,
                     "category": "scripts",
@@ -225,7 +292,7 @@ def test_generate_text_and_query_saved_materials() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["output_text"] == "镜头一：飞船掠过暴雨中的城市，旁白压低语气揭开危机。"
+    assert body["output_text"] == "Opening shot: the ship cuts through the storm."
     assert body["saved_assets"][0]["category"] == "scripts"
     assert fake_gateway.last_text_payload is not None
     assert fake_gateway.last_text_payload["payload"].task_type == "script_writing"
@@ -251,7 +318,7 @@ def test_generate_rejects_model_without_required_capability() -> None:
                 "provider_id": provider_id,
                 "model": "forge-text-v1",
                 "count": 1,
-                "prompt": "不应该通过",
+                "prompt": "This should be rejected",
             },
             headers=headers,
         )
@@ -279,7 +346,7 @@ def test_generate_rejects_provider_owned_by_other_user() -> None:
                 "provider_id": provider_id,
                 "model": "forge-image-v1",
                 "count": 1,
-                "prompt": "不应该访问别人的 provider",
+                "prompt": "Other users should not access this provider",
             },
             headers=other_headers,
         )
@@ -318,7 +385,7 @@ def test_generate_rejects_asset_material_owned_by_other_user() -> None:
                 "provider_id": provider_id,
                 "model": "forge-video-v1",
                 "count": 1,
-                "prompt": "使用别人的素材不应成功",
+                "prompt": "Using another user's asset should fail",
                 "image_material_asset_ids": [image_asset_response.json()["asset_id"]],
             },
             headers=other_headers,

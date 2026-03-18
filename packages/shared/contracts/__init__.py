@@ -8,6 +8,7 @@ from packages.shared.contracts.generations import (
     ProviderTextGenerationResult,
     TextGenerationRequest,
     TextGenerationResponse,
+    VideoInputMaterial,
     VideoGenerationRequest,
 )
 from packages.shared.contracts.providers import (
@@ -48,5 +49,6 @@ __all__ = [
     "TaskResponse",
     "TextGenerationRequest",
     "TextGenerationResponse",
+    "VideoInputMaterial",
     "VideoGenerationRequest",
 ]

@@ -7,7 +7,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 from packages.shared.enums.model_capability import ModelCapability
 
-ProviderAdapterType = Literal["generic_json", "modelscope"]
+ProviderAdapterType = Literal["generic_json", "modelscope", "volcengine_ark"]
 
 
 class ProviderModelConfig(BaseModel):

@@ -39,9 +39,8 @@ export function VideoGenForm() {
   const elapsedMs = useElapsedMs(loading);
 
   useEffect(() => {
-    if (!providerId) return;
     void loadProviders();
-  }, [providerId]);
+  }, []);
 
   async function loadProviders() {
     if (loaded) return;
@@ -52,9 +51,17 @@ export function VideoGenForm() {
       );
       setProviders(filtered);
       setLoaded(true);
-      if (providerId && !filtered.some((p) => p.provider_id === providerId)) {
-        setProviderId("");
-        setModel("");
+      const nextProviderId =
+        filtered.find((p) => p.provider_id === providerId)?.provider_id ??
+        filtered.find((p) => p.is_builtin && p.adapter_type === "volcengine_ark")?.provider_id ??
+        filtered[0]?.provider_id ??
+        "";
+      const nextProvider = filtered.find((p) => p.provider_id === nextProviderId);
+      const nextModel =
+        nextProvider?.models.find((m) => m.capabilities.includes("video"))?.model ?? "";
+      setProviderId(nextProviderId);
+      if (!model || !nextProvider?.models.some((item) => item.model === model)) {
+        setModel(nextModel);
       }
     } catch {
       setError("加载供应商失败");
@@ -64,8 +71,15 @@ export function VideoGenForm() {
   const selectedProvider = providers.find((p) => p.provider_id === providerId);
   const videoModels =
     selectedProvider?.models.filter((m) => m.capabilities.includes("video")) ?? [];
+  const maxCount = selectedProvider?.adapter_type === "volcengine_ark" ? 1 : 10;
 
   const selectedImageAssets = imageAssets.filter((a) => imageMaterialAssetIds.includes(a.asset_id));
+
+  useEffect(() => {
+    if (!selectedProvider) return;
+    if (model && videoModels.some((item) => item.model === model)) return;
+    setModel(videoModels[0]?.model ?? "");
+  }, [selectedProvider, videoModels, model]);
 
   async function openAssetPicker() {
     setAssetPickerOpen(true);
@@ -256,7 +270,6 @@ export function VideoGenForm() {
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="描述你想生成的视频..."
             rows={4}
-            required
           />
         </div>
 
@@ -347,9 +360,9 @@ export function VideoGenForm() {
             className="form-input"
             type="number"
             min={1}
-            max={10}
+            max={maxCount}
             value={count}
-            onChange={(e) => setCount(Number(e.target.value))}
+            onChange={(e) => setCount(Math.min(maxCount, Math.max(1, Number(e.target.value) || 1)))}
           />
         </div>
 

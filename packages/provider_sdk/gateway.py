@@ -22,6 +22,24 @@ from services.api.app.services.errors import UpstreamServiceError, ValidationSer
 
 logger = logging.getLogger(__name__)
 
+_VOLCENGINE_VIDEO_TERMINAL_STATUS = {"cancelled", "failed", "expired", "succeeded"}
+_VOLCENGINE_VIDEO_RUNNING_STATUS = {"queued", "running"}
+_VOLCENGINE_VIDEO_OPTION_KEYS = (
+    "callback_url",
+    "return_last_frame",
+    "service_tier",
+    "execution_expires_after",
+    "generate_audio",
+    "draft",
+    "resolution",
+    "ratio",
+    "duration",
+    "frames",
+    "seed",
+    "camera_fixed",
+    "watermark",
+)
+
 
 class ProviderGateway(Protocol):
     async def generate_image(
@@ -70,6 +88,8 @@ class HttpProviderGateway:
         provider: ProviderRecord,
         payload: VideoGenerationPayload,
     ) -> ProviderMediaGenerationResult:
+        if provider.adapter_type == "volcengine_ark":
+            return await self._generate_volcengine_video(provider, provider.routes.video, payload)
         body = {
             "model": payload.model,
             "count": payload.count,
@@ -271,6 +291,44 @@ class HttpProviderGateway:
                 )
             await asyncio.sleep(1.0)
 
+    async def _generate_volcengine_video(
+        self,
+        provider: ProviderRecord,
+        endpoint: ProviderEndpointConfig,
+        payload: VideoGenerationPayload,
+    ) -> ProviderMediaGenerationResult:
+        submit_url = _resolve_endpoint_url(str(provider.base_url), endpoint.path)
+        submit_body = _build_volcengine_video_request_body(payload)
+        submit_result = await self._post(provider, endpoint, submit_body, url=submit_url)
+        task_id = submit_result.get("id") or submit_result.get("task_id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            detail = _extract_volcengine_error_message(submit_result)
+            if detail:
+                raise UpstreamServiceError(detail)
+            raise UpstreamServiceError("Volcengine video generation response missing task id")
+
+        poll_url = _resolve_volcengine_task_url(str(provider.base_url), task_id)
+        deadline = time.monotonic() + endpoint.timeout_seconds
+        while True:
+            task_result = await self._get(provider, endpoint, url=poll_url)
+            task_status = str(task_result.get("status") or "").strip().lower()
+            if task_status == "succeeded":
+                return _parse_volcengine_video_result(task_id, task_result)
+            if task_status in _VOLCENGINE_VIDEO_TERMINAL_STATUS:
+                detail = _extract_volcengine_error_message(task_result)
+                if not detail:
+                    detail = f"Volcengine video generation ended with status {task_status}"
+                raise UpstreamServiceError(detail)
+            if task_status and task_status not in _VOLCENGINE_VIDEO_RUNNING_STATUS:
+                raise UpstreamServiceError(
+                    f"Volcengine video generation returned unknown status {task_status}"
+                )
+            if time.monotonic() >= deadline:
+                raise UpstreamServiceError(
+                    f"Volcengine video generation timed out while waiting for task {task_id}"
+                )
+            await asyncio.sleep(1.0)
+
     def _parse_media_result(self, body: dict[str, Any]) -> ProviderMediaGenerationResult:
         raw_outputs = body.get("outputs")
         if raw_outputs is None and isinstance(body.get("data"), list):
@@ -449,6 +507,10 @@ def _resolve_modelscope_task_url(base_url: str, task_id: str) -> str:
     return _resolve_endpoint_url(base_url, f"/v1/tasks/{task_id}")
 
 
+def _resolve_volcengine_task_url(base_url: str, task_id: str) -> str:
+    return _resolve_endpoint_url(base_url, f"/contents/generations/tasks/{task_id}")
+
+
 def _summarize_body(value: Any) -> Any:
     if isinstance(value, dict):
         summarized: dict[str, Any] = {}
@@ -467,7 +529,14 @@ def _summarize_body(value: Any) -> Any:
                 summarized[key] = f"<base64_list:{len(item)} items>"
                 continue
 
-            if isinstance(item, list) and key in ("image_material_urls", "scene_prompt_texts", "outputs", "data"):
+            if isinstance(item, list) and key in (
+                "content",
+                "image_material_urls",
+                "image_materials",
+                "scene_prompt_texts",
+                "outputs",
+                "data",
+            ):
                 summarized[key] = f"<list:{len(item)} items>"
                 continue
 
@@ -523,6 +592,181 @@ def _extract_modelscope_error_message(body: dict[str, Any]) -> str | None:
         value = body.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    return None
+
+
+def _build_volcengine_video_request_body(payload: VideoGenerationPayload) -> dict[str, Any]:
+    if payload.count != 1:
+        raise ValidationServiceError("Volcengine Ark video generation requires count=1")
+    if payload.options.get("frames") is not None:
+        raise ValidationServiceError("Volcengine Seedance 1.5 Pro does not support frames")
+
+    content: list[dict[str, Any]] = []
+    if payload.resolved_prompt:
+        content.append({"type": "text", "text": payload.resolved_prompt})
+
+    draft_task_id = str(payload.options.get("draft_task_id") or "").strip()
+    if draft_task_id:
+        content.append({"type": "draft_task", "draft_task": {"id": draft_task_id}})
+
+    content.extend(_build_volcengine_image_content(payload))
+    if not content:
+        raise ValidationServiceError(
+            "Volcengine video generation requires prompt, image materials, or draft_task_id"
+        )
+
+    body: dict[str, Any] = {"model": payload.model, "content": content}
+    for key in _VOLCENGINE_VIDEO_OPTION_KEYS:
+        if key in payload.options:
+            body[key] = payload.options[key]
+    return body
+
+
+def _build_volcengine_image_content(payload: VideoGenerationPayload) -> list[dict[str, Any]]:
+    materials = _coerce_volcengine_input_materials(payload)
+    input_mode = str(payload.options.get("input_mode") or "").strip().lower()
+    if input_mode == "reference_image" or len(materials) > 2:
+        raise ValidationServiceError(
+            "Volcengine Seedance 1.5 Pro does not support reference-image mode; use one first frame or two first/last frames"
+        )
+    if input_mode == "first_last_frame" and len(materials) != 2:
+        raise ValidationServiceError("Volcengine first/last-frame mode requires exactly 2 images")
+    if input_mode == "first_frame" and len(materials) != 1:
+        raise ValidationServiceError("Volcengine first-frame mode requires exactly 1 image")
+
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(materials):
+        role = "first_frame" if index == 0 else "last_frame"
+        items.append(
+            {
+                "type": "image_url",
+                "role": role,
+                "image_url": {"url": _normalize_volcengine_image_url(item)},
+            }
+        )
+    return items
+
+
+def _coerce_volcengine_input_materials(payload: VideoGenerationPayload) -> list[Any]:
+    if payload.image_materials:
+        return payload.image_materials
+
+    materials: list[dict[str, str]] = []
+    for value in payload.image_material_urls:
+        materials.append({"kind": "url", "value": value})
+    for value in payload.image_material_base64:
+        materials.append({"kind": "base64", "value": value})
+    return materials
+
+
+def _normalize_volcengine_image_url(item: Any) -> str:
+    if hasattr(item, "kind"):
+        kind = str(item.kind)
+        value = str(item.value)
+    elif isinstance(item, dict):
+        kind = str(item.get("kind") or "")
+        value = str(item.get("value") or "")
+    else:
+        raise ValidationServiceError("Volcengine image material must be a url/base64 object")
+
+    normalized_value = value.strip()
+    if not normalized_value:
+        raise ValidationServiceError("Volcengine image material value cannot be empty")
+    if kind == "url":
+        return normalized_value
+    if kind == "base64":
+        if normalized_value.startswith("data:"):
+            return normalized_value
+        return f"data:image/png;base64,{normalized_value}"
+    raise ValidationServiceError(f"Unsupported Volcengine image material kind: {kind}")
+
+
+def _parse_volcengine_video_result(
+    task_id: str,
+    body: dict[str, Any],
+) -> ProviderMediaGenerationResult:
+    content = body.get("content")
+    if not isinstance(content, dict):
+        raise UpstreamServiceError(
+            "Volcengine video generation succeeded but returned invalid content payload"
+        )
+
+    video_url = content.get("video_url")
+    if not isinstance(video_url, str) or not video_url.strip():
+        raise UpstreamServiceError(
+            "Volcengine video generation succeeded but returned no video_url"
+        )
+
+    metadata = {
+        key: value
+        for key, value in body.items()
+        if key
+        in {
+            "model",
+            "status",
+            "seed",
+            "resolution",
+            "ratio",
+            "duration",
+            "frames",
+            "usage",
+            "created_at",
+            "updated_at",
+        }
+    }
+    return ProviderMediaGenerationResult(
+        provider_request_id=task_id,
+        outputs=[
+            GeneratedMediaOutput(
+                index=0,
+                url=video_url.strip(),
+                mime_type="video/mp4",
+                cover_image_url=_string_or_none(content.get("last_frame_url")),
+                duration_seconds=_float_or_none(body.get("duration")),
+                metadata=metadata,
+            )
+        ],
+    )
+
+
+def _extract_volcengine_error_message(body: dict[str, Any]) -> str | None:
+    error = body.get("error")
+    if isinstance(error, dict):
+        code = _string_or_none(error.get("code"))
+        message = _string_or_none(error.get("message") or error.get("detail"))
+        if code and message:
+            return f"{code}: {message}"
+        if message:
+            return message
+        if code:
+            return code
+    if isinstance(error, str) and error.strip():
+        return error.strip()
+
+    task_id = _string_or_none(body.get("id"))
+    status = _string_or_none(body.get("status"))
+    for key in ("message", "detail"):
+        value = _string_or_none(body.get(key))
+        if value:
+            if task_id and status:
+                return f"Volcengine task {task_id} {status}: {value}"
+            return value
+    if task_id and status and status in {"cancelled", "failed", "expired"}:
+        return f"Volcengine task {task_id} ended with status {status}"
+    return None
+
+
+def _string_or_none(value: Any) -> str | None:
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized:
+            return normalized
+    return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
     return None
 
 

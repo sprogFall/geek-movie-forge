@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -52,8 +52,13 @@ class VideoGenerationRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_prompt(self) -> Self:
-        if not (self.prompt or self.preset_prompt):
-            raise ValueError("prompt or preset_prompt is required")
+        has_prompt = bool(self.prompt or self.preset_prompt)
+        has_image_materials = bool(self.image_material_asset_ids or self.image_material_urls)
+        has_draft_task = bool(str(self.options.get("draft_task_id") or "").strip())
+        if not (has_prompt or has_image_materials or has_draft_task):
+            raise ValueError(
+                "prompt or preset_prompt is required when no image materials or draft_task_id are provided"
+            )
         return self
 
 
@@ -80,13 +85,21 @@ class ImageGenerationPayload(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class VideoInputMaterial(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    kind: Literal["url", "base64"]
+    value: str = Field(min_length=1)
+
+
 class VideoGenerationPayload(BaseModel):
     provider_id: str
     model: str
     count: int
     prompt: str | None = None
     preset_prompt: str | None = None
-    resolved_prompt: str = Field(min_length=1)
+    resolved_prompt: str | None = None
+    image_materials: list[VideoInputMaterial] = Field(default_factory=list)
     image_material_urls: list[str] = Field(default_factory=list)
     image_material_base64: list[str] = Field(default_factory=list)
     scene_prompt_texts: list[str] = Field(default_factory=list)
