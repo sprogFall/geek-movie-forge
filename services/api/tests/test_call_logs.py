@@ -21,6 +21,7 @@ class FakeProviderGateway(ProviderGateway):
                     "mime_type": "image/png",
                 }
             ],
+            usage={"input_tokens": 33, "output_tokens": 11, "total_tokens": 44},
         )
 
     async def generate_video(self, provider, payload):
@@ -39,6 +40,7 @@ class FakeProviderGateway(ProviderGateway):
         return ProviderTextGenerationResult(
             provider_request_id="txt_req_001",
             output_text="生成的文本结果。",
+            usage={"input_tokens": 20, "output_tokens": 10, "total_tokens": 30},
         )
 
 
@@ -104,6 +106,7 @@ def test_image_generation_creates_success_call_log() -> None:
     assert items[0]["capability"] == "image"
     assert items[0]["model"] == "forge-image-v1"
     assert items[0]["duration_ms"] >= 0
+    assert items[0]["token_usage"]["total_tokens"] == 44
 
 
 def test_gateway_error_creates_error_call_log() -> None:

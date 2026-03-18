@@ -142,6 +142,7 @@ export function CallLogList() {
                 <th style={thStyle}>类型</th>
                 <th style={thStyle}>状态</th>
                 <th style={thStyle}>耗时</th>
+                <th style={thStyle}>Token</th>
                 <th style={thStyle}>摘要</th>
               </tr>
             </thead>
@@ -230,13 +231,25 @@ function LogRow({
           </span>
         </td>
         <td style={tdStyle}>{log.duration_ms}ms</td>
+        <td style={tdStyle}>
+          {log.token_usage?.total_tokens != null ? (
+            <div style={{ display: "grid", gap: 2 }}>
+              <strong style={{ fontSize: "0.86rem" }}>{log.token_usage.total_tokens}</strong>
+              <small style={{ color: "var(--muted)" }}>
+                in {log.token_usage.prompt_tokens ?? 0} / out {log.token_usage.completion_tokens ?? 0}
+              </small>
+            </div>
+          ) : (
+            <span style={{ color: "var(--muted)" }}>-</span>
+          )}
+        </td>
         <td style={{ ...tdStyle, maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {log.request_body_summary}
         </td>
       </tr>
       {expanded && isError && log.error_detail && (
         <tr>
-          <td colSpan={7} style={{ padding: "0.8rem 1.2rem", background: "rgba(220,60,60,0.06)" }}>
+          <td colSpan={8} style={{ padding: "0.8rem 1.2rem", background: "rgba(220,60,60,0.06)" }}>
             <div style={{ fontFamily: "monospace", fontSize: "0.82rem", whiteSpace: "pre-wrap", color: "var(--tone-risk, #dc3c3c)" }}>
               {log.error_detail}
             </div>

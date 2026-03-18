@@ -6,7 +6,7 @@ export default function VideoGenerationPage() {
     <AppShell
       eyebrow="生成"
       title="视频生成"
-      description="根据提示词生成视频片段，可选填参考图片。"
+      description="支持单视频直出，也支持先规划多段脚本后并行生成多条视频。"
     >
       <VideoGenForm />
     </AppShell>

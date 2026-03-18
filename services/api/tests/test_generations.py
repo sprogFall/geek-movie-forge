@@ -36,6 +36,7 @@ class FakeProviderGateway(ProviderGateway):
 
     async def generate_video(self, provider, payload):
         self.last_video_payload = {"provider": provider, "payload": payload}
+        duration_seconds = payload.options.get("duration_seconds") or payload.options.get("duration")
         return ProviderMediaGenerationResult(
             provider_request_id="vid_req_001",
             outputs=[
@@ -44,17 +45,39 @@ class FakeProviderGateway(ProviderGateway):
                     "url": "https://cdn.example.com/generated/video-1.mp4",
                     "mime_type": "video/mp4",
                     "cover_image_url": "https://cdn.example.com/generated/video-1-cover.png",
-                    "duration_seconds": 8,
+                    "duration_seconds": duration_seconds or 8,
                 }
             ],
+            usage={"input_tokens": 120, "output_tokens": 45, "total_tokens": 165},
         )
 
     async def generate_text(self, provider, payload):
         self.last_text_payload = {"provider": provider, "payload": payload}
+        if payload.task_type == "video_segmentation_plan":
+            return ProviderTextGenerationResult(
+                provider_request_id="txt_plan_001",
+                output_text=(
+                    '{"segments":['
+                    '{"title":"开场钩子","visual_prompt":"夜色城市俯拍，霓虹闪烁","narration_text":"雨夜里，主角独自穿过空旷街头。"},'
+                    '{"title":"冲突升级","visual_prompt":"镜头快速推进，敌人逼近","narration_text":"警报骤然响起，身后的追兵越来越近。"},'
+                    '{"title":"情绪收束","visual_prompt":"慢镜头定格，人物回头","narration_text":"他终于停下脚步，决定直面这场追逐。"}'
+                    ']}'
+                ),
+                usage={"input_tokens": 80, "output_tokens": 50, "total_tokens": 130},
+            )
         return ProviderTextGenerationResult(
             provider_request_id="txt_req_001",
-            output_text="Opening shot: the ship cuts through the storm.",
+            output_text="开场镜头：飞船劈开风暴，朝着失落海域疾驰。",
+            usage={"input_tokens": 60, "output_tokens": 32, "total_tokens": 92},
         )
+
+
+class PartialFailVideoGateway(FakeProviderGateway):
+    async def generate_video(self, provider, payload):
+        self.last_video_payload = {"provider": provider, "payload": payload}
+        if "冲突升级" in (payload.prompt or ""):
+            raise RuntimeError("second segment failed")
+        return await super().generate_video(provider, payload)
 
 
 def _create_provider(client: TestClient, headers: dict[str, str]) -> str:
@@ -292,13 +315,182 @@ def test_generate_text_and_query_saved_materials() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["output_text"] == "Opening shot: the ship cuts through the storm."
+    assert body["output_text"] == "开场镜头：飞船劈开风暴，朝着失落海域疾驰。"
     assert body["saved_assets"][0]["category"] == "scripts"
     assert fake_gateway.last_text_payload is not None
     assert fake_gateway.last_text_payload["payload"].task_type == "script_writing"
+    assert "只输出简体中文结果" in fake_gateway.last_text_payload["payload"].resolved_prompt
     assert list_assets_response.status_code == 200
     assert len(list_assets_response.json()["items"]) == 1
     assert list_assets_response.json()["items"][0]["content_text"] == body["output_text"]
+
+
+def test_plan_multi_video_returns_ai_segment_plan() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, headers)
+
+        prompt_asset = client.post(
+            "/api/v1/assets",
+            json={
+                "asset_type": "text",
+                "category": "reference",
+                "name": "scene",
+                "content_text": "城市追逐，节奏紧张，结尾反转。",
+            },
+            headers=headers,
+        )
+
+        response = client.post(
+            "/api/v1/generations/videos/plan",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-text-v1",
+                "prompt": "做一个 26 秒的中文悬疑短视频",
+                "total_duration_seconds": 26,
+                "segment_duration_seconds": 10,
+                "scene_prompt_asset_ids": [prompt_asset.json()["asset_id"]],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["segment_count"] == 3
+    assert [item["duration_seconds"] for item in body["segments"]] == [10, 10, 6]
+    assert body["segments"][0]["title"] == "开场钩子"
+    assert body["usage"]["total_tokens"] == 130
+    assert fake_gateway.last_text_payload is not None
+    assert fake_gateway.last_text_payload["payload"].task_type == "video_segmentation_plan"
+    assert "只能输出 JSON 对象" in fake_gateway.last_text_payload["payload"].resolved_prompt
+
+
+def test_generate_multi_video_returns_per_segment_results() -> None:
+    partial_gateway = PartialFailVideoGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=partial_gateway,
+        )
+        provider_id = _create_provider(client, headers)
+
+        response = client.post(
+            "/api/v1/generations/videos/batch",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "prompt": "赛博城市追逐短片",
+                "segments": [
+                    {
+                        "segment_index": 1,
+                        "title": "开场钩子",
+                        "duration_seconds": 10,
+                        "visual_prompt": "夜色城市俯拍，霓虹闪烁",
+                        "narration_text": "雨夜里，主角独自穿过空旷街头。",
+                    },
+                    {
+                        "segment_index": 2,
+                        "title": "冲突升级",
+                        "duration_seconds": 10,
+                        "visual_prompt": "镜头快速推进，敌人逼近",
+                        "narration_text": "警报骤然响起，身后的追兵越来越近。",
+                    },
+                ],
+                "options": {"resolution": "720p"},
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["segment_count"] == 2
+    assert body["segments"][0]["status"] == "success"
+    assert body["segments"][0]["generation"]["outputs"][0]["duration_seconds"] == 10
+    assert body["segments"][1]["status"] == "error"
+    assert "second segment failed" in body["segments"][1]["error_detail"]
+
+
+def test_regenerate_multi_video_segment_returns_single_result() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, headers)
+
+        response = client.post(
+            "/api/v1/generations/videos/segments/regenerate",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "prompt": "赛博城市镜头",
+                "segment": {
+                    "segment_index": 1,
+                    "title": "重制片段",
+                    "duration_seconds": 8,
+                    "visual_prompt": "雨中巷弄的高速跟随镜头",
+                    "narration_text": "他在霓虹的反射中急速奔跑，心跳加速。",
+                },
+                "scene_prompt_texts": ["城市追逐，节奏紧张"],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["visual_prompt"] == "雨中巷弄的高速跟随镜头"
+    assert body["generation"]["outputs"][0]["url"] == "https://cdn.example.com/generated/video-1.mp4"
+    assert body["token_usage"]["total_tokens"] == 165
+
+
+def test_regenerate_multi_video_segment_propagates_errors() -> None:
+    partial_gateway = PartialFailVideoGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=partial_gateway,
+        )
+        provider_id = _create_provider(client, headers)
+
+        response = client.post(
+            "/api/v1/generations/videos/segments/regenerate",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "prompt": "赛博城市镜头",
+                "segment": {
+                    "segment_index": 2,
+                    "title": "冲突升级",
+                    "duration_seconds": 10,
+                    "visual_prompt": "镜头快速推进，敌人逼近",
+                    "narration_text": "警报骤然响起，身后的追兵越来越近。",
+                },
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "error"
+    assert "second segment failed" in body["error_detail"]
 
 
 def test_generate_rejects_model_without_required_capability() -> None:

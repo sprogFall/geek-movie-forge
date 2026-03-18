@@ -11,6 +11,12 @@ class CallLogStatus(str, Enum):
     ERROR = "error"
 
 
+class TokenUsage(BaseModel):
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+
+
 class CallLogRecord(BaseModel):
     log_id: str
     owner_id: str
@@ -22,6 +28,7 @@ class CallLogRecord(BaseModel):
     response_status: CallLogStatus
     error_detail: str | None = None
     duration_ms: int
+    token_usage: TokenUsage | None = None
     created_at: datetime
 
 
@@ -35,6 +42,7 @@ class CallLogResponse(BaseModel):
     response_status: CallLogStatus
     error_detail: str | None = None
     duration_ms: int
+    token_usage: TokenUsage | None = None
     created_at: datetime
 
 

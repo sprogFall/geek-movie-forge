@@ -656,6 +656,12 @@ select {
   gap: 16px;
 }
 
+.form-row-tight {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
 .form-actions {
   display: flex;
   gap: 10px;
@@ -747,6 +753,31 @@ select {
   gap: 16px;
 }
 
+.mode-switch {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid var(--line);
+  width: fit-content;
+}
+
+.mode-switch-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mode-switch-btn.is-active {
+  background: linear-gradient(135deg, rgba(190, 91, 45, 0.16), rgba(190, 91, 45, 0.08));
+  color: var(--accent);
+}
+
 .gen-output-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -799,6 +830,62 @@ select {
 .gen-output-card .gen-output-meta small {
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.selected-text-list,
+.segment-plan-list {
+  display: grid;
+  gap: 12px;
+}
+
+.selected-text-card,
+.segment-plan-card {
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.55);
+  padding: 14px 16px;
+}
+
+.selected-text-card-head,
+.segment-plan-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.selected-text-card p,
+.segment-plan-copy {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.segment-plan-copy.is-script {
+  color: var(--text);
+}
+
+.segment-video-thumb {
+  width: 100%;
+  display: block;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.92);
+  margin-top: 12px;
+}
+
+.segment-video-empty {
+  margin-top: 12px;
+  min-height: 180px;
+  border-radius: 14px;
+  border: 1px dashed var(--line);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  padding: 18px;
 }
 
 .gen-text-output {
@@ -977,6 +1064,11 @@ select {
   box-shadow: 0 8px 32px rgba(44, 30, 15, 0.14);
 }
 
+.asset-card.is-selected {
+  border-color: rgba(190, 91, 45, 0.45);
+  box-shadow: 0 0 0 2px rgba(190, 91, 45, 0.18);
+}
+
 .asset-thumb {
   width: 100%;
   aspect-ratio: 4/3;
@@ -997,6 +1089,23 @@ select {
   font-size: 0.85rem;
   line-height: 1.5;
   overflow: hidden;
+}
+
+.asset-text-thumb-lg {
+  min-height: 180px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.asset-picker-grid {
+  max-height: 58vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.text-asset-card {
+  min-height: 300px;
 }
 
 .asset-info {
@@ -1025,6 +1134,11 @@ select {
   color: var(--accent);
   font-size: 0.76rem;
   font-weight: 600;
+}
+
+.tag-pill-danger {
+  background: rgba(182, 61, 46, 0.12);
+  color: var(--danger);
 }
 
 .builtin-badge {
@@ -1318,6 +1432,10 @@ select {
   }
 
   .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .form-row-tight {
     grid-template-columns: 1fr;
   }
 }

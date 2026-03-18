@@ -6,7 +6,7 @@ export default function CallLogsPage() {
     <AppShell
       eyebrow="资源库"
       title="调用日志"
-      description="查看 AI 供应商调用记录与错误详情。"
+      description="查看 AI 供应商调用记录、错误详情与每次调用的 Token 消耗。"
     >
       <CallLogList />
     </AppShell>

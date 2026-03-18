@@ -1,22 +1,36 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import math
+import re
 import time
 from uuid import uuid4
 
 from packages.provider_sdk.gateway import ProviderGateway
 from packages.shared.contracts.assets import AssetCreateRequest, AssetResponse
-from packages.shared.contracts.call_logs import CallLogStatus
+from packages.shared.contracts.call_logs import CallLogStatus, TokenUsage as CallLogTokenUsage
 from packages.shared.contracts.generations import (
     ImageGenerationPayload,
     ImageGenerationRequest,
     MediaGenerationResponse,
+    MultiVideoGenerationRequest,
+    MultiVideoGenerationResponse,
+    MultiVideoPlanRequest,
+    MultiVideoPlanResponse,
+    MultiVideoSegmentGenerationResult,
+    MultiVideoSegmentRegenerationRequest,
+    ProviderMediaGenerationResult,
+    ProviderTextGenerationResult,
     TextGenerationPayload,
     TextGenerationRequest,
     TextGenerationResponse,
+    TokenUsage as GenerationTokenUsage,
     VideoInputMaterial,
     VideoGenerationPayload,
     VideoGenerationRequest,
+    VideoSegmentPlan,
 )
 from packages.shared.contracts.providers import ProviderRecord
 from packages.shared.enums.asset_origin import AssetOrigin
@@ -118,7 +132,8 @@ class GenerationService:
             payload.scene_prompt_asset_ids,
         )
         scene_prompt_texts.extend(payload.scene_prompt_texts)
-        resolved_prompt = _merge_prompt(payload.preset_prompt, payload.prompt) or None
+        base_prompt = _merge_prompt(payload.preset_prompt, payload.prompt) or None
+        resolved_prompt = _build_video_resolved_prompt(base_prompt, scene_prompt_texts)
 
         gateway_payload = VideoGenerationPayload(
             provider_id=payload.provider_id,
@@ -157,9 +172,10 @@ class GenerationService:
             capability=ModelCapability.VIDEO,
             provider_id=payload.provider_id,
             model=payload.model,
-            resolved_prompt=gateway_payload.resolved_prompt or "",
+            resolved_prompt=resolved_prompt or "",
             provider_request_id=provider_result.provider_request_id,
             outputs=provider_result.outputs,
+            usage=_extract_usage(provider_result),
             saved_assets=saved_assets,
         )
 
@@ -191,7 +207,11 @@ class GenerationService:
             payload.model,
             ModelCapability.TEXT,
         )
-        resolved_prompt = _merge_prompt(payload.preset_prompt, payload.prompt) or None
+        user_resolved_prompt = _merge_prompt(payload.preset_prompt, payload.prompt) or None
+        provider_resolved_prompt = _build_text_generation_prompt(
+            payload.task_type,
+            user_resolved_prompt,
+        )
         gateway_payload = TextGenerationPayload(
             provider_id=payload.provider_id,
             model=payload.model,
@@ -199,16 +219,20 @@ class GenerationService:
             source_text=payload.source_text,
             prompt=payload.prompt,
             preset_prompt=payload.preset_prompt,
-            resolved_prompt=resolved_prompt,
-            options=payload.options,
+            resolved_prompt=provider_resolved_prompt,
+            options=_enrich_text_generation_options(payload.options),
         )
         provider_result = await self._log_and_call(
             owner_id=owner_id,
             provider=provider,
             model=payload.model,
             capability=ModelCapability.TEXT,
-            request_summary=resolved_prompt or payload.source_text or "",
+            request_summary=provider_resolved_prompt or payload.source_text or "",
             coro=self._provider_gateway.generate_text(provider, gateway_payload),
+        )
+        output_text = _sanitize_text_output(
+            provider_result.output_text,
+            task_type=payload.task_type,
         )
         saved_assets: list[AssetResponse] = []
         if payload.save.enabled:
@@ -219,7 +243,7 @@ class GenerationService:
                         asset_type=AssetType.TEXT,
                         category=payload.save.category or AssetType.TEXT.value,
                         name=(payload.save.name_prefix or "text-result"),
-                        content_text=provider_result.output_text,
+                        content_text=output_text,
                         tags=payload.save.tags,
                         provider_id=provider.provider_id,
                         model=payload.model,
@@ -234,9 +258,9 @@ class GenerationService:
             model=payload.model,
             task_type=payload.task_type,
             source_text=payload.source_text,
-            resolved_prompt=resolved_prompt,
+            resolved_prompt=user_resolved_prompt,
             provider_request_id=provider_result.provider_request_id,
-            output_text=provider_result.output_text,
+            output_text=output_text,
             saved_assets=saved_assets,
         )
         logger.info(
@@ -253,6 +277,141 @@ class GenerationService:
             },
         )
         return response
+
+    async def plan_multi_video(
+        self,
+        owner_id: str,
+        payload: MultiVideoPlanRequest,
+    ) -> MultiVideoPlanResponse:
+        provider, _ = self._provider_service.ensure_model_capability(
+            owner_id,
+            payload.provider_id,
+            payload.model,
+            ModelCapability.TEXT,
+        )
+        scene_prompt_texts = self._resolve_scene_prompt_materials(
+            owner_id,
+            payload.scene_prompt_asset_ids,
+        )
+        scene_prompt_texts.extend(payload.scene_prompt_texts)
+        segment_durations = _plan_segment_durations(
+            payload.total_duration_seconds,
+            payload.segment_duration_seconds,
+        )
+        source_text = _build_multi_video_plan_source_text(
+            prompt=payload.prompt,
+            total_duration_seconds=payload.total_duration_seconds,
+            segment_durations=segment_durations,
+            scene_prompt_texts=scene_prompt_texts,
+        )
+        resolved_prompt = _build_multi_video_planning_prompt(len(segment_durations))
+        gateway_payload = TextGenerationPayload(
+            provider_id=payload.provider_id,
+            model=payload.model,
+            task_type="video_segmentation_plan",
+            source_text=source_text,
+            prompt=payload.prompt,
+            preset_prompt=payload.preset_prompt,
+            resolved_prompt=resolved_prompt,
+            options=_enrich_text_generation_options(payload.options),
+        )
+        provider_result = await self._log_and_call(
+            owner_id=owner_id,
+            provider=provider,
+            model=payload.model,
+            capability=ModelCapability.TEXT,
+            request_summary=payload.prompt,
+            coro=self._provider_gateway.generate_text(provider, gateway_payload),
+        )
+        segments = _parse_multi_video_segments(
+            provider_result.output_text,
+            segment_durations,
+        )
+        return MultiVideoPlanResponse(
+            plan_id=f"plan_{uuid4().hex[:12]}",
+            provider_id=payload.provider_id,
+            model=payload.model,
+            prompt=payload.prompt,
+            resolved_prompt=resolved_prompt,
+            total_duration_seconds=payload.total_duration_seconds,
+            segment_duration_seconds=payload.segment_duration_seconds,
+            segment_count=len(segments),
+            provider_request_id=provider_result.provider_request_id,
+            usage=provider_result.usage,
+            segments=segments,
+        )
+
+    async def generate_multi_video(
+        self,
+        owner_id: str,
+        payload: MultiVideoGenerationRequest,
+    ) -> MultiVideoGenerationResponse:
+        self._provider_service.ensure_model_capability(
+            owner_id,
+            payload.provider_id,
+            payload.model,
+            ModelCapability.VIDEO,
+        )
+        global_scene_prompt_texts = self._resolve_scene_prompt_materials(
+            owner_id,
+            payload.scene_prompt_asset_ids,
+        )
+        global_scene_prompt_texts.extend(payload.scene_prompt_texts)
+        tasks = [
+            self._generate_multi_video_segment(
+                owner_id=owner_id,
+                provider_id=payload.provider_id,
+                model=payload.model,
+                prompt=payload.prompt,
+                preset_prompt=payload.preset_prompt,
+                segment=segment,
+                image_material_asset_ids=payload.image_material_asset_ids,
+                image_material_urls=payload.image_material_urls,
+                scene_prompt_texts=global_scene_prompt_texts,
+                save=payload.save,
+                options=payload.options,
+            )
+            for segment in payload.segments
+        ]
+        segments = await asyncio.gather(*tasks)
+        return MultiVideoGenerationResponse(
+            batch_id=f"batch_{uuid4().hex[:12]}",
+            provider_id=payload.provider_id,
+            model=payload.model,
+            prompt=payload.prompt,
+            segment_count=len(segments),
+            segments=segments,
+        )
+
+    async def regenerate_multi_video_segment(
+        self,
+        owner_id: str,
+        payload: MultiVideoSegmentRegenerationRequest,
+    ) -> MultiVideoSegmentGenerationResult:
+        provider, _ = self._provider_service.ensure_model_capability(
+            owner_id,
+            payload.provider_id,
+            payload.model,
+            ModelCapability.VIDEO,
+        )
+        scene_prompt_texts = self._resolve_scene_prompt_materials(
+            owner_id,
+            payload.scene_prompt_asset_ids,
+        )
+        scene_prompt_texts.extend(payload.scene_prompt_texts)
+        return await self._generate_multi_video_segment(
+            owner_id=owner_id,
+            provider_id=payload.provider_id,
+            model=payload.model,
+            prompt=payload.prompt,
+            preset_prompt=payload.preset_prompt,
+            segment=payload.segment,
+            image_material_asset_ids=payload.image_material_asset_ids,
+            image_material_urls=payload.image_material_urls,
+            scene_prompt_texts=scene_prompt_texts,
+            save=payload.save,
+            options=payload.options,
+        )
 
     async def _log_and_call(
         self,
@@ -301,6 +460,7 @@ class GenerationService:
                         request_body_summary=request_summary[:200],
                         response_status=CallLogStatus.SUCCESS,
                         duration_ms=duration_ms,
+                        token_usage=_to_call_log_token_usage(_extract_usage(result)),
                     )
                 except Exception:
                     logger.warning("Failed to write success call log", exc_info=True)
@@ -338,6 +498,75 @@ class GenerationService:
             if isinstance(exc, ServiceError):
                 raise
             raise UpstreamServiceError(f"Provider call failed: {exc}") from exc
+
+    async def _generate_multi_video_segment(
+        self,
+        *,
+        owner_id: str,
+        provider_id: str,
+        model: str,
+        prompt: str,
+        preset_prompt: str | None,
+        segment: VideoSegmentPlan,
+        image_material_asset_ids: list[str],
+        image_material_urls: list[str],
+        scene_prompt_texts: list[str],
+        save,
+        options: dict,
+    ) -> MultiVideoSegmentGenerationResult:
+        segment_prompt = _build_multi_video_segment_prompt(
+            prompt=prompt,
+            preset_prompt=preset_prompt,
+            segment=segment,
+        )
+        segment_options = dict(options)
+        segment_options.setdefault("duration", segment.duration_seconds)
+        segment_options.setdefault("duration_seconds", segment.duration_seconds)
+        if save.enabled:
+            name_prefix = save.name_prefix or "multi-video"
+            segment_save = save.model_copy(
+                update={"name_prefix": f"{name_prefix}-seg-{segment.segment_index}"}
+            )
+        else:
+            segment_save = save
+
+        try:
+            generation = await self.generate_video(
+                owner_id,
+                VideoGenerationRequest(
+                    provider_id=provider_id,
+                    model=model,
+                    count=1,
+                    prompt=segment_prompt,
+                    image_material_asset_ids=image_material_asset_ids,
+                    image_material_urls=image_material_urls,
+                    scene_prompt_texts=scene_prompt_texts,
+                    save=segment_save,
+                    options=segment_options,
+                ),
+            )
+            return MultiVideoSegmentGenerationResult(
+                segment_index=segment.segment_index,
+                title=segment.title,
+                duration_seconds=segment.duration_seconds,
+                visual_prompt=segment.visual_prompt,
+                narration_text=segment.narration_text,
+                resolved_prompt=generation.resolved_prompt,
+                status="success",
+                generation=generation,
+                token_usage=generation.usage,
+            )
+        except ServiceError as exc:
+            return MultiVideoSegmentGenerationResult(
+                segment_index=segment.segment_index,
+                title=segment.title,
+                duration_seconds=segment.duration_seconds,
+                visual_prompt=segment.visual_prompt,
+                narration_text=segment.narration_text,
+                resolved_prompt=segment_prompt,
+                status="error",
+                error_detail=exc.detail,
+            )
 
     def _resolve_image_materials(
         self,
@@ -421,6 +650,239 @@ class GenerationService:
                 )
             )
         return saved_assets
+
+
+def _build_text_generation_prompt(
+    task_type: str,
+    user_prompt: str | None,
+) -> str:
+    instructions = [
+        "你是专业中文影视文案助手。",
+        "只输出简体中文结果。",
+        "禁止输出 Python、代码、JSON、Markdown 代码块、英文说明、前言、后记或规则解释。",
+        "直接输出最终可用正文，不要写“下面是结果”“当然可以”等套话。",
+    ]
+    if task_type.strip().lower() in {"script", "script_writing", "caption", "copy"}:
+        instructions.append("输出内容必须贴近视频画面与叙事，优先写成可直接用于视频创作的中文脚本或文案。")
+    if user_prompt:
+        instructions.append("用户附加要求：")
+        instructions.append(user_prompt)
+    return "\n".join(instructions)
+
+
+def _enrich_text_generation_options(options: dict) -> dict:
+    enriched = dict(options)
+    enriched.setdefault("output_language", "zh-CN")
+    enriched.setdefault("response_format_hint", "plain_text")
+    return enriched
+
+
+def _sanitize_text_output(text: str, *, task_type: str) -> str:
+    normalized = _strip_code_fences(text).strip()
+    if not normalized:
+        raise UpstreamServiceError("文本模型返回空内容")
+    if _looks_like_source_code(normalized):
+        raise UpstreamServiceError("文本模型返回了代码内容，请重试或调整提示词")
+    if _should_enforce_chinese(task_type) and not _contains_chinese(normalized):
+        raise UpstreamServiceError("文本模型返回了非中文内容，请重试或调整提示词")
+    return normalized
+
+
+def _strip_code_fences(text: str) -> str:
+    value = (text or "").strip()
+    if value.startswith("```") and value.endswith("```"):
+        value = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", value)
+        value = re.sub(r"\s*```$", "", value)
+    return value.strip()
+
+
+def _looks_like_source_code(text: str) -> bool:
+    code_markers = (
+        "```",
+        "import ",
+        "from ",
+        "def ",
+        "class ",
+        "print(",
+        "return ",
+        "if __name__ ==",
+        "console.log(",
+    )
+    stripped = text.strip()
+    first_line = stripped.splitlines()[0] if stripped else ""
+    return any(marker in stripped for marker in code_markers) or first_line.endswith(":")
+
+
+def _should_enforce_chinese(task_type: str) -> bool:
+    return task_type.strip().lower() not in {"translate_en", "translate_english"}
+
+
+def _contains_chinese(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+
+def _build_video_resolved_prompt(
+    base_prompt: str | None,
+    scene_prompt_texts: list[str],
+) -> str | None:
+    parts = [part for part in [base_prompt] if part]
+    if scene_prompt_texts:
+        parts.append("请严格贴合以下中文剧情/分镜线索生成视频：")
+        parts.extend(
+            f"{index}. {item}"
+            for index, item in enumerate(scene_prompt_texts, start=1)
+            if item.strip()
+        )
+    if not parts:
+        return None
+    return "\n".join(parts)
+
+
+def _plan_segment_durations(total_duration_seconds: int, segment_duration_seconds: int) -> list[int]:
+    segment_count = max(1, math.ceil(total_duration_seconds / segment_duration_seconds))
+    durations = [segment_duration_seconds] * segment_count
+    remainder = total_duration_seconds - segment_duration_seconds * (segment_count - 1)
+    durations[-1] = remainder
+    return durations
+
+
+def _build_multi_video_plan_source_text(
+    *,
+    prompt: str,
+    total_duration_seconds: int,
+    segment_durations: list[int],
+    scene_prompt_texts: list[str],
+) -> str:
+    lines = [
+        f"总视频时长：{total_duration_seconds} 秒",
+        f"分段数量：{len(segment_durations)}",
+        f"每段时长：{', '.join(f'{item}秒' for item in segment_durations)}",
+        "核心创作需求：",
+        prompt,
+    ]
+    if scene_prompt_texts:
+        lines.append("补充文本素材：")
+        lines.extend(
+            f"{index}. {item}" for index, item in enumerate(scene_prompt_texts, start=1)
+        )
+    return "\n".join(lines)
+
+
+def _build_multi_video_planning_prompt(segment_count: int) -> str:
+    return "\n".join(
+        [
+            "你是短视频分镜策划助手，只能输出 JSON 对象。",
+            "禁止输出 Markdown、解释、代码块或额外文字。",
+            f"请严格输出 {segment_count} 个分段。",
+            'JSON 格式：{"segments":[{"title":"", "visual_prompt":"", "narration_text":""}]}',
+            "每段都必须使用简体中文，内容要和用户提示强关联，镜头描述具体，可直接用于视频生成。",
+        ]
+    )
+
+
+def _parse_multi_video_segments(
+    output_text: str,
+    segment_durations: list[int],
+) -> list[VideoSegmentPlan]:
+    parsed = _extract_json_object(output_text)
+    raw_segments = parsed.get("segments")
+    if not isinstance(raw_segments, list):
+        raise UpstreamServiceError("分镜规划结果缺少 segments 数组")
+    if len(raw_segments) != len(segment_durations):
+        raise UpstreamServiceError("分镜规划返回的分段数量与目标数量不一致")
+
+    segments: list[VideoSegmentPlan] = []
+    for index, (raw_item, duration_seconds) in enumerate(
+        zip(raw_segments, segment_durations, strict=True),
+        start=1,
+    ):
+        if not isinstance(raw_item, dict):
+            raise UpstreamServiceError("分镜规划的 segment 数据格式无效")
+        title = _coerce_plan_text(raw_item.get("title")) or f"第 {index} 段"
+        visual_prompt = _coerce_plan_text(
+            raw_item.get("visual_prompt") or raw_item.get("prompt") or raw_item.get("shot_description")
+        )
+        narration_text = _coerce_plan_text(
+            raw_item.get("narration_text") or raw_item.get("script") or raw_item.get("voiceover")
+        )
+        if not visual_prompt or not narration_text:
+            raise UpstreamServiceError("分镜规划缺少 visual_prompt 或 narration_text")
+        segments.append(
+            VideoSegmentPlan(
+                segment_index=index,
+                title=title,
+                duration_seconds=duration_seconds,
+                visual_prompt=visual_prompt,
+                narration_text=narration_text,
+            )
+        )
+    return segments
+
+
+def _extract_json_object(text: str) -> dict:
+    cleaned = _strip_code_fences(text)
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise UpstreamServiceError("分镜规划结果不是有效 JSON")
+    try:
+        parsed = json.loads(cleaned[start : end + 1])
+    except json.JSONDecodeError as exc:
+        raise UpstreamServiceError("分镜规划结果解析失败") from exc
+    if not isinstance(parsed, dict):
+        raise UpstreamServiceError("分镜规划结果不是有效 JSON 对象")
+    return parsed
+
+
+def _coerce_plan_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _build_multi_video_segment_prompt(
+    *,
+    prompt: str,
+    preset_prompt: str | None,
+    segment: VideoSegmentPlan,
+) -> str:
+    parts = [part for part in (_merge_prompt(preset_prompt, prompt),) if part]
+    parts.extend(
+        [
+            f"当前仅生成第 {segment.segment_index} 段视频。",
+            f"段落标题：{segment.title}",
+            f"目标时长：{segment.duration_seconds} 秒",
+            f"画面提示：{segment.visual_prompt}",
+            f"文案脚本：{segment.narration_text}",
+        ]
+    )
+    parts.append("请确保视频画面与上述文案和镜头提示强关联。")
+    return "\n".join(parts)
+
+
+def _extract_usage(result: object) -> GenerationTokenUsage | None:
+    usage = getattr(result, "usage", None)
+    if isinstance(usage, GenerationTokenUsage):
+        return usage
+    return None
+
+
+def _to_call_log_token_usage(usage: GenerationTokenUsage | None) -> CallLogTokenUsage | None:
+    if usage is None:
+        return None
+    return CallLogTokenUsage(
+        prompt_tokens=usage.input_tokens,
+        completion_tokens=usage.output_tokens,
+        total_tokens=usage.total_tokens,
+    )
 
 
 def _merge_prompt(preset_prompt: str | None, prompt: str | None) -> str:

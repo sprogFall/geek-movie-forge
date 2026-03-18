@@ -106,6 +106,55 @@ export type MediaGenerationResponse = {
   saved_assets: AssetResponse[];
 };
 
+export type TokenUsage = {
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+};
+
+export type VideoSegmentPlan = {
+  segment_index: number;
+  title: string;
+  visual_prompt: string;
+  narration_text: string;
+  duration_seconds: number;
+};
+
+export type MultiVideoPlanResponse = {
+  plan_id: string;
+  provider_id: string;
+  model: string;
+  prompt: string;
+  resolved_prompt: string;
+  total_duration_seconds: number;
+  segment_duration_seconds: number;
+  segment_count: number;
+  provider_request_id: string | null;
+  usage: TokenUsage | null;
+  segments: VideoSegmentPlan[];
+};
+
+export type MultiVideoSegmentGenerationResult = {
+  segment_index: number;
+  title: string;
+  duration_seconds: number;
+  visual_prompt: string;
+  narration_text: string;
+  resolved_prompt: string;
+  status: "success" | "error";
+  generation: MediaGenerationResponse | null;
+  error_detail: string | null;
+};
+
+export type MultiVideoGenerationResponse = {
+  batch_id: string;
+  provider_id: string;
+  model: string;
+  prompt: string;
+  segment_count: number;
+  segments: MultiVideoSegmentGenerationResult[];
+};
+
 export type TextGenerationResponse = {
   generation_id: string;
   capability: "text";
@@ -190,6 +239,7 @@ export type CallLogResponse = {
   response_status: CallLogStatus;
   error_detail: string | null;
   duration_ms: number;
+  token_usage: TokenUsage | null;
   created_at: string;
 };
 

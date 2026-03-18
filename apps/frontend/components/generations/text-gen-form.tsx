@@ -16,6 +16,8 @@ export function TextGenForm() {
   const [taskType, setTaskType] = useState("script");
   const [sourceText, setSourceText] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [forceChinese, setForceChinese] = useState(true);
+  const [forceScript, setForceScript] = useState(taskType === "script");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<TextGenerationResponse | null>(null);
@@ -34,6 +36,12 @@ export function TextGenForm() {
     if (!providerId) return;
     void loadProviders();
   }, [providerId]);
+
+  useEffect(() => {
+    if (taskType === "script") {
+      setForceScript(true);
+    }
+  }, [taskType]);
 
   async function loadProviders() {
     if (loaded) return;
@@ -90,6 +98,21 @@ export function TextGenForm() {
     }
   }
 
+  function composePromptWithConstraints() {
+    const constraints: string[] = [];
+    if (forceChinese) {
+      constraints.push("请使用中文输出，仅保留中文内容，避免英文或代码块。");
+    }
+    if (forceScript) {
+      constraints.push("请以脚本格式组织内容，包含镜头方向、台词与动作，不要解释提示词。");
+    }
+    const trimmedPrompt = prompt.trim();
+    if (trimmedPrompt) {
+      constraints.push(trimmedPrompt);
+    }
+    return constraints.join("\n");
+  }
+
   async function handleSaveToAssets() {
     if (!result) return;
     if (savedAssets.length > 0) return;
@@ -134,8 +157,9 @@ export function TextGenForm() {
         task_type: taskType,
         source_text: sourceText,
       };
-      if (prompt.trim()) {
-        body.prompt = prompt;
+      const finalPrompt = composePromptWithConstraints();
+      if (finalPrompt) {
+        body.prompt = finalPrompt;
       }
       const res = await generateTexts(body);
       setResult(res);
@@ -219,7 +243,9 @@ export function TextGenForm() {
 
         <div className="form-group">
           <label className="form-label">附加提示</label>
-          <span className="form-hint">可选，用于补充约束或风格要求</span>
+          <span className="form-hint">
+            可选，用于补充约束或风格要求。系统会额外强制中文纯文本输出，避免返回代码。
+          </span>
           <textarea
             className="form-textarea"
             value={prompt}
@@ -227,6 +253,31 @@ export function TextGenForm() {
             placeholder="例如：控制在 200 字以内，口语化风格..."
             rows={3}
           />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">语言与格式</label>
+          <div className="form-actions" style={{ gap: "1rem", flexWrap: "wrap" }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={forceChinese}
+                onChange={(e) => setForceChinese(e.target.checked)}
+              />
+              <span>仅输出中文</span>
+            </label>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={forceScript}
+                onChange={(e) => setForceScript(e.target.checked)}
+              />
+              <span>以脚本格式呈现</span>
+            </label>
+          </div>
+          <span className="form-hint">
+            勾选后会在提示词前自动补充约束，以减少英文、讲解性内容或代码。
+          </span>
         </div>
 
         <div className="form-actions">

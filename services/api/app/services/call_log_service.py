@@ -9,6 +9,7 @@ from packages.shared.contracts.call_logs import (
     CallLogRecord,
     CallLogResponse,
     CallLogStatus,
+    TokenUsage,
 )
 from services.api.app.core.store import JsonFileStore
 from services.api.app.services.errors import NotFoundServiceError
@@ -34,6 +35,7 @@ class InMemoryCallLogService:
         response_status: CallLogStatus,
         error_detail: str | None = None,
         duration_ms: int,
+        token_usage: TokenUsage | None = None,
     ) -> CallLogResponse:
         record = CallLogRecord(
             log_id=f"log_{uuid4().hex[:12]}",
@@ -46,6 +48,7 @@ class InMemoryCallLogService:
             response_status=response_status,
             error_detail=error_detail,
             duration_ms=duration_ms,
+            token_usage=token_usage,
             created_at=datetime.now(UTC),
         )
         self._logs[record.log_id] = record
@@ -88,6 +91,7 @@ class InMemoryCallLogService:
             response_status=record.response_status,
             error_detail=record.error_detail,
             duration_ms=record.duration_ms,
+            token_usage=record.token_usage,
             created_at=record.created_at,
         )
 

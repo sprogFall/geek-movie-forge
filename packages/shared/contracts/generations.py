@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from packages.shared.contracts.assets import AssetResponse
 from packages.shared.enums.model_capability import ModelCapability
+from packages.shared.contracts.call_logs import TokenUsage
 
 
 class AssetSaveOptions(BaseModel):
@@ -15,6 +16,12 @@ class AssetSaveOptions(BaseModel):
     category: str | None = None
     name_prefix: str | None = None
     tags: list[str] = Field(default_factory=list)
+
+
+class TokenUsage(BaseModel):
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
 
 
 class ImageGenerationRequest(BaseModel):
@@ -117,6 +124,82 @@ class TextGenerationPayload(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class VideoSegmentPlan(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    segment_index: int = Field(ge=1)
+    title: str = Field(min_length=1)
+    duration_seconds: int = Field(ge=1, le=120)
+    visual_prompt: str = Field(min_length=1)
+    narration_text: str = Field(min_length=1)
+
+
+class MultiVideoPlanRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    provider_id: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    preset_prompt: str | None = None
+    total_duration_seconds: int = Field(ge=5, le=600)
+    segment_duration_seconds: int = Field(ge=5, le=120)
+    scene_prompt_asset_ids: list[str] = Field(default_factory=list)
+    scene_prompt_texts: list[str] = Field(default_factory=list)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_durations(self) -> Self:
+        if self.segment_duration_seconds > self.total_duration_seconds:
+            raise ValueError("segment_duration_seconds must be <= total_duration_seconds")
+        return self
+
+
+class MultiVideoPlanResponse(BaseModel):
+    plan_id: str
+    provider_id: str
+    model: str
+    prompt: str
+    resolved_prompt: str
+    total_duration_seconds: int
+    segment_duration_seconds: int
+    segment_count: int
+    provider_request_id: str | None = None
+    usage: TokenUsage | None = None
+    segments: list[VideoSegmentPlan] = Field(default_factory=list)
+
+
+class MultiVideoGenerationRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    provider_id: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    preset_prompt: str | None = None
+    segments: list[VideoSegmentPlan] = Field(min_length=1)
+    image_material_asset_ids: list[str] = Field(default_factory=list)
+    image_material_urls: list[str] = Field(default_factory=list)
+    scene_prompt_asset_ids: list[str] = Field(default_factory=list)
+    scene_prompt_texts: list[str] = Field(default_factory=list)
+    save: AssetSaveOptions = Field(default_factory=AssetSaveOptions)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class MultiVideoSegmentRegenerationRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    provider_id: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    preset_prompt: str | None = None
+    segment: VideoSegmentPlan
+    image_material_asset_ids: list[str] = Field(default_factory=list)
+    image_material_urls: list[str] = Field(default_factory=list)
+    scene_prompt_asset_ids: list[str] = Field(default_factory=list)
+    scene_prompt_texts: list[str] = Field(default_factory=list)
+    save: AssetSaveOptions = Field(default_factory=AssetSaveOptions)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
 class GeneratedMediaOutput(BaseModel):
     index: int
     url: str | None = None
@@ -131,12 +214,14 @@ class GeneratedMediaOutput(BaseModel):
 class ProviderMediaGenerationResult(BaseModel):
     provider_request_id: str | None = None
     outputs: list[GeneratedMediaOutput] = Field(default_factory=list)
+    usage: TokenUsage | None = None
 
 
 class ProviderTextGenerationResult(BaseModel):
     provider_request_id: str | None = None
     output_text: str = Field(min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    usage: TokenUsage | None = None
 
 
 class MediaGenerationResponse(BaseModel):
@@ -147,6 +232,7 @@ class MediaGenerationResponse(BaseModel):
     resolved_prompt: str
     provider_request_id: str | None = None
     outputs: list[GeneratedMediaOutput]
+    usage: TokenUsage | None = None
     saved_assets: list[AssetResponse] = Field(default_factory=list)
 
 
@@ -161,3 +247,27 @@ class TextGenerationResponse(BaseModel):
     provider_request_id: str | None = None
     output_text: str
     saved_assets: list[AssetResponse] = Field(default_factory=list)
+
+
+class MultiVideoSegmentGenerationResult(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    segment_index: int = Field(ge=1)
+    title: str
+    duration_seconds: int = Field(ge=1)
+    visual_prompt: str
+    narration_text: str
+    resolved_prompt: str
+    status: Literal["success", "error"]
+    generation: MediaGenerationResponse | None = None
+    token_usage: TokenUsage | None = None
+    error_detail: str | None = None
+
+
+class MultiVideoGenerationResponse(BaseModel):
+    batch_id: str
+    provider_id: str
+    model: str
+    prompt: str
+    segment_count: int
+    segments: list[MultiVideoSegmentGenerationResult] = Field(default_factory=list)

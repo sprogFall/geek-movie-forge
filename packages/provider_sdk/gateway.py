@@ -15,6 +15,7 @@ from packages.shared.contracts.generations import (
     ProviderMediaGenerationResult,
     ProviderTextGenerationResult,
     TextGenerationPayload,
+    TokenUsage,
     VideoGenerationPayload,
 )
 from packages.shared.contracts.providers import ProviderEndpointConfig, ProviderRecord
@@ -351,6 +352,7 @@ class HttpProviderGateway:
         return ProviderMediaGenerationResult(
             provider_request_id=body.get("provider_request_id") or body.get("request_id"),
             outputs=outputs,
+            usage=_parse_token_usage(body.get("usage")),
         )
 
     def _parse_text_result(self, body: dict[str, Any]) -> ProviderTextGenerationResult:
@@ -366,6 +368,7 @@ class HttpProviderGateway:
                     or body.get("id"),
                     output_text=output_text,
                     metadata=metadata,
+                    usage=_parse_token_usage(body.get("usage")),
                 )
 
         output_text = body.get("output_text") or body.get("text") or body.get("content")
@@ -379,6 +382,7 @@ class HttpProviderGateway:
             provider_request_id=body.get("provider_request_id") or body.get("request_id"),
             output_text=output_text,
             metadata=body.get("metadata") or {},
+            usage=_parse_token_usage(body.get("usage")),
         )
 
 
@@ -726,6 +730,7 @@ def _parse_volcengine_video_result(
                 metadata=metadata,
             )
         ],
+        usage=_parse_token_usage(body.get("usage")),
     )
 
 
@@ -844,4 +849,44 @@ def _coerce_openai_content_to_text(content: Any) -> str | None:
                 parts.append(text.strip())
         if parts:
             return "\n".join(parts)
+    return None
+
+
+def _parse_token_usage(value: Any) -> TokenUsage | None:
+    if not isinstance(value, dict):
+        return None
+
+    prompt_tokens = _coerce_int(
+        value.get("prompt_tokens")
+        or value.get("input_tokens")
+        or value.get("prompt_token_count")
+    )
+    completion_tokens = _coerce_int(
+        value.get("completion_tokens")
+        or value.get("output_tokens")
+        or value.get("completion_token_count")
+    )
+    total_tokens = _coerce_int(value.get("total_tokens"))
+    if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+        total_tokens = prompt_tokens + completion_tokens
+
+    if prompt_tokens is None and completion_tokens is None and total_tokens is None:
+        return None
+
+    return TokenUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+    )
+
+
+def _coerce_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
     return None

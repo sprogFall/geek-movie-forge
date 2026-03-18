@@ -11,6 +11,8 @@ import type {
   TaskResponse,
   MediaGenerationResponse,
   TextGenerationResponse,
+  MultiVideoPlanResponse,
+  MultiVideoGenerationResponse,
   CallLogListResponse,
   CallLogResponse,
 } from "@/types/api";
@@ -204,6 +206,22 @@ export function generateImages(body: Record<string, unknown>) {
 
 export function generateVideos(body: Record<string, unknown>) {
   return request<MediaGenerationResponse>("/api/v1/generations/videos", {
+    method: "POST",
+    body: JSON.stringify(body),
+    timeout: LONG_TIMEOUT,
+  });
+}
+
+export function planMultiVideos(body: Record<string, unknown>) {
+  return request<MultiVideoPlanResponse>("/api/v1/generations/videos/plan", {
+    method: "POST",
+    body: JSON.stringify(body),
+    timeout: LONG_TIMEOUT,
+  });
+}
+
+export function generateMultiVideos(body: Record<string, unknown>) {
+  return request<MultiVideoGenerationResponse>("/api/v1/generations/videos/batch", {
     method: "POST",
     body: JSON.stringify(body),
     timeout: LONG_TIMEOUT,
