@@ -51,6 +51,7 @@ export function VideoGenForm() {
   const [mode, setMode] = useState<GenerationMode>("single");
   const [prompt, setPrompt] = useState("");
   const [count, setCount] = useState(1);
+  const [generateAudio, setGenerateAudio] = useState(true);
   const [imageMaterialUrls, setImageMaterialUrls] = useState("");
   const [imageMaterialAssetIds, setImageMaterialAssetIds] = useState<string[]>([]);
   const [scenePromptTextInput, setScenePromptTextInput] = useState("");
@@ -250,6 +251,9 @@ export function VideoGenForm() {
       provider_id: providerId,
       model,
     };
+    if (selectedVideoProvider?.adapter_type === "volcengine_ark") {
+      body.options = { generate_audio: generateAudio };
+    }
     if (prompt.trim()) {
       body.prompt = prompt.trim();
     }
@@ -681,6 +685,23 @@ export function VideoGenForm() {
             rows={4}
           />
         </div>
+
+        {selectedVideoProvider?.adapter_type === "volcengine_ark" && (
+          <div className="form-group">
+            <label className="form-label">音频</label>
+            <label className="form-check">
+              <input
+                type="checkbox"
+                checked={generateAudio}
+                onChange={(e) => setGenerateAudio(e.target.checked)}
+              />
+              <span>生成音频/旁白</span>
+            </label>
+            <span className="form-hint">
+              关闭后会生成无音轨视频，浏览器播放器中的音量按钮也会不可用。
+            </span>
+          </div>
+        )}
 
         <div className="form-group">
           <label className="form-label">文本素材 / 剧情补充</label>

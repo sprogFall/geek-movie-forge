@@ -437,7 +437,7 @@ def test_generate_multi_video_returns_per_segment_results() -> None:
     assert "second segment failed" in body["segments"][1]["error_detail"]
 
 
-def test_generate_multi_video_isolates_segment_prompts_and_disables_default_audio() -> None:
+def test_generate_multi_video_isolates_segment_prompts_and_enables_audio_by_default() -> None:
     recording_gateway = RecordingVideoGateway()
 
     with TestClient(app) as client:
@@ -495,7 +495,72 @@ def test_generate_multi_video_isolates_segment_prompts_and_disables_default_audi
     assert "弟子定当勤勉。外门弟子三千，内门八百。" in prompts[2]
 
     options = [item["payload"].options for item in recording_gateway.video_payloads]
-    assert all(item["generate_audio"] is False for item in options)
+    assert all(item["generate_audio"] is True for item in options)
+
+
+def test_generate_multi_video_preserves_explicit_generate_audio_false() -> None:
+    recording_gateway = RecordingVideoGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=recording_gateway,
+        )
+        provider_id = _create_provider(client, headers, adapter_type="volcengine_ark")
+
+        response = client.post(
+            "/api/v1/generations/videos/batch",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "prompt": "赛博都市追逐短片",
+                "segments": [
+                    {
+                        "segment_index": 1,
+                        "title": "开场",
+                        "duration_seconds": 10,
+                        "visual_prompt": "雨夜霓虹街头，主角奔跑",
+                        "narration_text": "警报声拉响，脚步声逼近。",
+                    }
+                ],
+                "options": {"generate_audio": False},
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    assert len(recording_gateway.video_payloads) == 1
+    assert recording_gateway.video_payloads[0]["payload"].options["generate_audio"] is False
+
+
+def test_generate_video_enables_audio_by_default_for_volcengine_ark() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, headers, adapter_type="volcengine_ark")
+
+        response = client.post(
+            "/api/v1/generations/videos",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "count": 1,
+                "prompt": "雨夜街头追逐镜头",
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    assert fake_gateway.last_video_payload is not None
+    assert fake_gateway.last_video_payload["payload"].options["generate_audio"] is True
 
 
 def test_regenerate_multi_video_segment_returns_single_result() -> None:

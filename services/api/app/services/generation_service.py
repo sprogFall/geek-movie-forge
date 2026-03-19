@@ -146,7 +146,10 @@ class GenerationService:
             image_material_urls=image_urls,
             image_material_base64=image_base64,
             scene_prompt_texts=scene_prompt_texts,
-            options=payload.options,
+            options=_build_video_generation_options(
+                payload.options,
+                provider_adapter_type=provider.adapter_type,
+            ),
         )
         provider_result = await self._log_and_call(
             owner_id=owner_id,
@@ -881,12 +884,24 @@ def _build_multi_video_segment_options(
     *,
     provider_adapter_type: str,
 ) -> dict:
-    segment_options = dict(options)
+    segment_options = _build_video_generation_options(
+        options,
+        provider_adapter_type=provider_adapter_type,
+    )
     segment_options.setdefault("duration", segment.duration_seconds)
     segment_options.setdefault("duration_seconds", segment.duration_seconds)
-    if provider_adapter_type == "volcengine_ark":
-        segment_options.setdefault("generate_audio", False)
     return segment_options
+
+
+def _build_video_generation_options(
+    options: dict,
+    *,
+    provider_adapter_type: str,
+) -> dict:
+    enriched = dict(options)
+    if provider_adapter_type == "volcengine_ark":
+        enriched.setdefault("generate_audio", True)
+    return enriched
 
 
 def _extract_usage(result: object) -> GenerationTokenUsage | None:
