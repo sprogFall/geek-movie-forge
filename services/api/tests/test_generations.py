@@ -80,13 +80,30 @@ class PartialFailVideoGateway(FakeProviderGateway):
         return await super().generate_video(provider, payload)
 
 
-def _create_provider(client: TestClient, headers: dict[str, str]) -> str:
+class RecordingVideoGateway(FakeProviderGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.video_payloads = []
+
+    async def generate_video(self, provider, payload):
+        self.last_video_payload = {"provider": provider, "payload": payload}
+        self.video_payloads.append({"provider": provider, "payload": payload})
+        return await super().generate_video(provider, payload)
+
+
+def _create_provider(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    adapter_type: str = "generic_json",
+) -> str:
     response = client.post(
         "/api/v1/providers",
         json={
             "name": "Generation Provider",
             "base_url": "https://provider.example.com/v1",
             "api_key": "super-secret-key",
+            "adapter_type": adapter_type,
             "models": [
                 {"model": "forge-image-v1", "capabilities": ["image"]},
                 {"model": "forge-video-v1", "capabilities": ["video"]},
@@ -418,6 +435,67 @@ def test_generate_multi_video_returns_per_segment_results() -> None:
     assert body["segments"][0]["generation"]["outputs"][0]["duration_seconds"] == 10
     assert body["segments"][1]["status"] == "error"
     assert "second segment failed" in body["segments"][1]["error_detail"]
+
+
+def test_generate_multi_video_isolates_segment_prompts_and_disables_default_audio() -> None:
+    recording_gateway = RecordingVideoGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=recording_gateway,
+        )
+        provider_id = _create_provider(client, headers, adapter_type="volcengine_ark")
+
+        response = client.post(
+            "/api/v1/generations/videos/batch",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "prompt": "凡人修仙开场，突出仙宗震撼感",
+                "segments": [
+                    {
+                        "segment_index": 1,
+                        "title": "云海仙宗",
+                        "duration_seconds": 10,
+                        "visual_prompt": "远景航拍，浩瀚云海翻涌，七座主峰刺破苍穹",
+                        "narration_text": "云海翻涌，七座主峰如巨剑刺破苍穹。",
+                    },
+                    {
+                        "segment_index": 2,
+                        "title": "初见震撼",
+                        "duration_seconds": 10,
+                        "visual_prompt": "中景推近韩立侧脸，瞳孔中倒映霞光与楼阁",
+                        "narration_text": "这就是修仙大派？落云宗立派三千年。",
+                    },
+                    {
+                        "segment_index": 3,
+                        "title": "拜别入宗",
+                        "duration_seconds": 10,
+                        "visual_prompt": "师徒二人沿青石长阶上山，身影没入云雾",
+                        "narration_text": "弟子定当勤勉。外门弟子三千，内门八百。",
+                    },
+                ],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    assert len(recording_gateway.video_payloads) == 3
+
+    prompts = [item["payload"].resolved_prompt or "" for item in recording_gateway.video_payloads]
+    assert all("只允许使用当前分段信息" in prompt for prompt in prompts)
+    assert "云海翻涌，七座主峰如巨剑刺破苍穹。" in prompts[0]
+    assert "这就是修仙大派？落云宗立派三千年。" not in prompts[0]
+    assert "弟子定当勤勉。外门弟子三千，内门八百。" not in prompts[0]
+    assert "这就是修仙大派？落云宗立派三千年。" in prompts[1]
+    assert "弟子定当勤勉。外门弟子三千，内门八百。" not in prompts[1]
+    assert "弟子定当勤勉。外门弟子三千，内门八百。" in prompts[2]
+
+    options = [item["payload"].options for item in recording_gateway.video_payloads]
+    assert all(item["generate_audio"] is False for item in options)
 
 
 def test_regenerate_multi_video_segment_returns_single_result() -> None:

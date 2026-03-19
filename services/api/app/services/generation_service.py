@@ -346,7 +346,7 @@ class GenerationService:
         owner_id: str,
         payload: MultiVideoGenerationRequest,
     ) -> MultiVideoGenerationResponse:
-        self._provider_service.ensure_model_capability(
+        provider, _ = self._provider_service.ensure_model_capability(
             owner_id,
             payload.provider_id,
             payload.model,
@@ -368,6 +368,7 @@ class GenerationService:
                 image_material_asset_ids=payload.image_material_asset_ids,
                 image_material_urls=payload.image_material_urls,
                 scene_prompt_texts=global_scene_prompt_texts,
+                provider_adapter_type=provider.adapter_type,
                 save=payload.save,
                 options=payload.options,
             )
@@ -409,6 +410,7 @@ class GenerationService:
             image_material_asset_ids=payload.image_material_asset_ids,
             image_material_urls=payload.image_material_urls,
             scene_prompt_texts=scene_prompt_texts,
+            provider_adapter_type=provider.adapter_type,
             save=payload.save,
             options=payload.options,
         )
@@ -511,6 +513,7 @@ class GenerationService:
         image_material_asset_ids: list[str],
         image_material_urls: list[str],
         scene_prompt_texts: list[str],
+        provider_adapter_type: str,
         save,
         options: dict,
     ) -> MultiVideoSegmentGenerationResult:
@@ -519,9 +522,11 @@ class GenerationService:
             preset_prompt=preset_prompt,
             segment=segment,
         )
-        segment_options = dict(options)
-        segment_options.setdefault("duration", segment.duration_seconds)
-        segment_options.setdefault("duration_seconds", segment.duration_seconds)
+        segment_options = _build_multi_video_segment_options(
+            options,
+            segment,
+            provider_adapter_type=provider_adapter_type,
+        )
         if save.enabled:
             name_prefix = save.name_prefix or "multi-video"
             segment_save = save.model_copy(
@@ -858,14 +863,30 @@ def _build_multi_video_segment_prompt(
     parts.extend(
         [
             f"当前仅生成第 {segment.segment_index} 段视频。",
+            "只允许使用当前分段信息，禁止引用、延续或复用其他分段的画面、台词、旁白或上下文。",
             f"段落标题：{segment.title}",
             f"目标时长：{segment.duration_seconds} 秒",
             f"画面提示：{segment.visual_prompt}",
-            f"文案脚本：{segment.narration_text}",
+            f"文案脚本（仅本段）：{segment.narration_text}",
         ]
     )
+    parts.append("如果模型支持自动生成音频或旁白，只能围绕本段文案，不要说出其他分段内容。")
     parts.append("请确保视频画面与上述文案和镜头提示强关联。")
     return "\n".join(parts)
+
+
+def _build_multi_video_segment_options(
+    options: dict,
+    segment: VideoSegmentPlan,
+    *,
+    provider_adapter_type: str,
+) -> dict:
+    segment_options = dict(options)
+    segment_options.setdefault("duration", segment.duration_seconds)
+    segment_options.setdefault("duration_seconds", segment.duration_seconds)
+    if provider_adapter_type == "volcengine_ark":
+        segment_options.setdefault("generate_audio", False)
+    return segment_options
 
 
 def _extract_usage(result: object) -> GenerationTokenUsage | None:
