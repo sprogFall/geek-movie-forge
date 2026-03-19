@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ReactNode, useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
 
 import { useAuth } from "@/lib/auth";
 import { navigationSections } from "@/lib/navigation";
@@ -14,10 +13,11 @@ type AppShellProps = {
   children: ReactNode;
 };
 
+const SIDEBAR_COLLAPSED_KEY = "gmf_sidebar:collapsed";
+
 export function AppShell({ eyebrow, title, description, children }: AppShellProps) {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const { user, logout } = useAuth();
-  const SIDEBAR_COLLAPSED_KEY = "gmf_sidebar:collapsed";
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
@@ -35,7 +35,7 @@ export function AppShell({ eyebrow, title, description, children }: AppShellProp
       try {
         localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
       } catch {
-        // ignore
+        // ignore localStorage failures
       }
       return next;
     });
@@ -75,19 +75,17 @@ export function AppShell({ eyebrow, title, description, children }: AppShellProp
           </div>
         </div>
 
-        <nav className="nav" aria-label="Primary navigation">
-          {navigationSections.map((section, si) => (
-            <div key={si} className="nav-section">
-              {section.title && (
-                <span className="nav-section-title">{section.title}</span>
-              )}
+        <nav className="nav" aria-label="主导航">
+          {navigationSections.map((section, index) => (
+            <div key={index} className="nav-section">
+              {section.title ? <span className="nav-section-title">{section.title}</span> : null}
               {section.items.map((item) => {
                 const isActive = pathname === item.href;
 
                 return (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    to={item.href}
                     className={`nav-link${isActive ? " is-active" : ""}`}
                     data-short={item.label.slice(0, 1)}
                     title={item.label}

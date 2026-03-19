@@ -142,7 +142,7 @@ export function CallLogList() {
                 <th style={thStyle}>类型</th>
                 <th style={thStyle}>状态</th>
                 <th style={thStyle}>耗时</th>
-                <th style={thStyle}>Token</th>
+                <th style={thStyle}>令牌用量</th>
                 <th style={thStyle}>摘要</th>
               </tr>
             </thead>
@@ -236,7 +236,7 @@ function LogRow({
             <div style={{ display: "grid", gap: 2 }}>
               <strong style={{ fontSize: "0.86rem" }}>{log.token_usage.total_tokens}</strong>
               <small style={{ color: "var(--muted)" }}>
-                in {log.token_usage.prompt_tokens ?? 0} / out {log.token_usage.completion_tokens ?? 0}
+                输入 {log.token_usage.prompt_tokens ?? 0} / 输出 {log.token_usage.completion_tokens ?? 0}
               </small>
             </div>
           ) : (

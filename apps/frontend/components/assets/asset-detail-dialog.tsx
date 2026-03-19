@@ -17,17 +17,21 @@ type Props = {
 function parseTags(input: string) {
   const parts = input
     .split(/[\n,]/g)
-    .map((v) => v.trim())
+    .map((value) => value.trim())
     .filter(Boolean);
   const seen = new Set<string>();
-  const out: string[] = [];
+  const output: string[] = [];
+
   for (const part of parts) {
     const key = part.toLowerCase();
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      continue;
+    }
     seen.add(key);
-    out.push(part);
+    output.push(part);
   }
-  return out;
+
+  return output;
 }
 
 export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Props) {
@@ -40,9 +44,13 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
   const toast = useToast();
 
   const canEditText = asset.asset_type === "text";
+  const assetTypeLabel =
+    { text: "文本", image: "图片", video: "视频" }[asset.asset_type] ?? asset.asset_type;
 
   const mediaSrc = useMemo(() => {
-    if (asset.content_url) return asset.content_url;
+    if (asset.content_url) {
+      return asset.content_url;
+    }
     if (asset.content_base64 && asset.asset_type === "image") {
       return `data:${asset.mime_type ?? "image/png"};base64,${asset.content_base64}`;
     }
@@ -57,21 +65,25 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
     setError("");
     try {
       const body: Record<string, unknown> = { tags: parseTags(tagsText) };
-      if (canEditText) body.content_text = contentText;
+      if (canEditText) {
+        body.content_text = contentText;
+      }
       const updated = await updateAsset(asset.asset_id, body);
       onUpdated(updated);
       toast.success("保存成功", "素材已更新");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "保存失败";
-      setError(msg);
-      toast.error("保存失败", msg);
+      const message = err instanceof Error ? err.message : "保存失败";
+      setError(message);
+      toast.error("保存失败", message);
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete() {
-    if (!confirm(`确定删除素材「${asset.name}」？此操作不可恢复。`)) return;
+    if (!confirm(`确定删除素材「${asset.name}」吗？此操作不可恢复。`)) {
+      return;
+    }
     setDeleting(true);
     setError("");
     try {
@@ -79,9 +91,9 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
       onDeleted(asset.asset_id);
       toast.success("删除成功", "素材已移除");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "删除失败";
-      setError(msg);
-      toast.error("删除失败", msg);
+      const message = err instanceof Error ? err.message : "删除失败";
+      setError(message);
+      toast.error("删除失败", message);
       setDeleting(false);
     }
   }
@@ -93,8 +105,9 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
           <div>
             <h2 style={{ marginBottom: 6 }}>{asset.name}</h2>
             <div style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-              {asset.asset_type.toUpperCase()} · {asset.category} ·{" "}
-              {new Date(asset.created_at).toLocaleString("zh-CN")}
+              {assetTypeLabel}
+              {asset.category ? ` · ${asset.category}` : ""}
+              {` · ${new Date(asset.created_at).toLocaleString("zh-CN")}`}
             </div>
           </div>
           <button className="btn btn-secondary btn-sm" type="button" onClick={onClose}>
@@ -102,16 +115,16 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
           </button>
         </div>
 
-        {error && <div className="error-banner" style={{ marginTop: 16 }}>{error}</div>}
+        {error ? <div className="error-banner" style={{ marginTop: 16 }}>{error}</div> : null}
 
-        {asset.asset_type === "image" && mediaSrc && (
+        {asset.asset_type === "image" && mediaSrc ? (
           <img className="media-preview-img" src={mediaSrc} alt={asset.name} />
-        )}
-        {asset.asset_type === "video" && mediaSrc && (
+        ) : null}
+        {asset.asset_type === "video" && mediaSrc ? (
           <video className="media-preview-video" src={mediaSrc} controls />
-        )}
+        ) : null}
 
-        {asset.asset_type === "text" && (
+        {asset.asset_type === "text" ? (
           <div style={{ marginTop: 16 }}>
             <div className="form-actions" style={{ paddingTop: 0 }}>
               <button
@@ -121,7 +134,7 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
                 disabled={mode === "preview"}
                 aria-disabled={mode === "preview"}
               >
-                {mode === "preview" ? "预览中" : "Markdown 预览"}
+                {mode === "preview" ? "预览中" : "渲染预览"}
               </button>
               <button
                 className={`btn btn-sm ${mode === "edit" ? "btn-primary" : "btn-secondary"}`}
@@ -144,12 +157,12 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
               <textarea
                 className="form-textarea"
                 value={contentText}
-                onChange={(e) => setContentText(e.target.value)}
+                onChange={(event) => setContentText(event.target.value)}
                 rows={10}
               />
             )}
           </div>
-        )}
+        ) : null}
 
         <div className="panel form-stack" style={{ marginTop: 18 }}>
           <div className="form-group">
@@ -160,18 +173,28 @@ export function AssetDetailDialog({ asset, onClose, onUpdated, onDeleted }: Prop
             <textarea
               className="form-textarea"
               value={tagsText}
-              onChange={(e) => setTagsText(e.target.value)}
+              onChange={(event) => setTagsText(event.target.value)}
               rows={2}
             />
           </div>
 
           <div className="form-actions">
-            <button className="btn btn-primary" type="button" onClick={handleSave} disabled={saving || deleting}>
-              {saving && <span className="spinner" />}
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={handleSave}
+              disabled={saving || deleting}
+            >
+              {saving ? <span className="spinner" /> : null}
               {saving ? "保存中..." : "保存"}
             </button>
-            <button className="btn btn-danger" type="button" onClick={handleDelete} disabled={saving || deleting}>
-              {deleting && <span className="spinner" />}
+            <button
+              className="btn btn-danger"
+              type="button"
+              onClick={handleDelete}
+              disabled={saving || deleting}
+            >
+              {deleting ? <span className="spinner" /> : null}
               {deleting ? "删除中..." : "删除"}
             </button>
           </div>

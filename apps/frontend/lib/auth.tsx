@@ -1,17 +1,17 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, useMemo, ReactNode } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import {
-  login as apiLogin,
-  register as apiRegister,
+  clearAuth,
+  fetchMe,
   getStoredToken,
   getStoredUser,
-  storeAuth,
-  clearAuth,
+  login as apiLogin,
+  register as apiRegister,
   setOnUnauthorized,
-  fetchMe,
+  storeAuth,
 } from "@/lib/api";
 import type { UserResponse } from "@/types/api";
 
@@ -24,26 +24,39 @@ type AuthState = {
 };
 
 const AuthContext = createContext<AuthState | null>(null);
-
 const PUBLIC_PATHS = ["/login", "/register"];
+
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PATHS.includes(pathname);
+}
+
+function AuthScreen({ message }: { message: string }) {
+  return (
+    <div className="loading-screen">
+      <div className="loading-panel">
+        <span className="loading-dot" />
+        <span>{message}</span>
+      </div>
+    </div>
+  );
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
-  const pathname = usePathname();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const logout = useCallback(() => {
     clearAuth();
     setUser(null);
-    router.push("/login");
-  }, [router]);
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   useEffect(() => {
     setOnUnauthorized(logout);
   }, [logout]);
 
-  // 初始化认证状态——仅在挂载时执行一次
   useEffect(() => {
     const token = getStoredToken();
     if (!token) {
@@ -51,49 +64,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // 优先从 localStorage 恢复用户态，立即解除 loading
     const stored = getStoredUser();
     if (stored) {
       setUser(stored);
       setLoading(false);
     }
 
-    // 后台校验 token 有效性（不阻塞页面渲染）
     fetchMe()
-      .then((u) => {
-        setUser(u);
-        storeAuth(token, u);
+      .then((nextUser) => {
+        setUser(nextUser);
+        storeAuth(token, nextUser);
       })
       .catch(() => {
-        // 仅在后台校验失败时登出，不影响已恢复的状态
         if (!stored) logout();
       })
       .finally(() => {
-        // 兜底：确保即使无 stored user 也能结束 loading
         setLoading(false);
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [logout]);
 
-  // 统一路由守卫：合并为单个 effect，减少重渲染次数
   useEffect(() => {
     if (loading) return;
-    const isPublic = PUBLIC_PATHS.includes(pathname);
+
+    const isPublic = isPublicPath(pathname);
     if (!user && !isPublic) {
-      router.replace("/login");
-    } else if (user && isPublic) {
-      router.replace("/");
+      navigate("/login", { replace: true });
+      return;
     }
-  }, [loading, user, pathname, router]);
+
+    if (user && isPublic) {
+      navigate("/", { replace: true });
+    }
+  }, [loading, navigate, pathname, user]);
 
   const handleLogin = useCallback(
     async (username: string, password: string) => {
       const res = await apiLogin(username, password);
       storeAuth(res.access_token, res.user);
       setUser(res.user);
-      router.push("/");
+      navigate("/", { replace: true });
     },
-    [router],
+    [navigate],
   );
 
   const handleRegister = useCallback(
@@ -101,37 +112,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await apiRegister(username, password);
       storeAuth(res.access_token, res.user);
       setUser(res.user);
-      router.push("/");
+      navigate("/", { replace: true });
     },
-    [router],
+    [navigate],
   );
 
-  // 稳定的 context value——仅在 user/loading/函数引用变化时生成新对象
   const value = useMemo<AuthState>(
     () => ({ user, loading, login: handleLogin, register: handleRegister, logout }),
     [user, loading, handleLogin, handleRegister, logout],
   );
 
   if (loading) {
-    return (
-      <div className="loading-screen">
-        <div className="loading-panel">
-          <span className="loading-dot" />
-          <span>加载中...</span>
-        </div>
-      </div>
-    );
+    return <AuthScreen message="正在加载登录状态..." />;
   }
 
-  if (!user && !PUBLIC_PATHS.includes(pathname)) {
-    return null;
+  if (!user && !isPublicPath(pathname)) {
+    return <AuthScreen message="登录状态无效，正在跳转到登录页..." />;
   }
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  if (user && isPublicPath(pathname)) {
+    return <AuthScreen message="正在进入控制台..." />;
+  }
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthState {

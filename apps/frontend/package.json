@@ -2,23 +2,25 @@
   "name": "@geek-movie-forge/frontend",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "rm -rf .next out dist && next build && node ./scripts/prepare-static-dist.cjs",
-    "start": "python3 -m http.server 3000 -d dist",
-    "lint": "next lint",
+    "dev": "vite --host 0.0.0.0 --port 3000",
+    "build": "node ./scripts/clean-build-artifacts.cjs && vite build",
+    "start": "vite preview --host 0.0.0.0 --port 3000",
+    "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-router-dom": "^7.9.4",
     "react-markdown": "^9.0.1",
     "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vite": "^7.1.7"
   }
 }

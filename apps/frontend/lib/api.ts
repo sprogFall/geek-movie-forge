@@ -17,9 +17,14 @@ import type {
   CallLogResponse,
 } from "@/types/api";
 
+const env = import.meta.env as ImportMetaEnv & {
+  readonly NEXT_PUBLIC_API_BASE_URL?: string;
+};
+
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
+  env.VITE_API_BASE_URL ??
+  env.VITE_API_URL ??
+  env.NEXT_PUBLIC_API_BASE_URL ??
   "http://localhost:8000";
 
 const TOKEN_KEY = "gmf_token";
@@ -236,7 +241,7 @@ export function generateTexts(body: Record<string, unknown>) {
   });
 }
 
-/* 鈹€鈹€ Projects 鈹€鈹€ */
+/* ── Projects ── */
 
 export function listProjects() {
   return request<ProjectListResponse>("/api/v1/projects");
@@ -253,7 +258,7 @@ export function createProject(body: Record<string, unknown>) {
   });
 }
 
-/* 鈹€鈹€ Tasks 鈹€鈹€ */
+/* ── Tasks ── */
 
 export function listTasks(params?: Record<string, string>) {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";

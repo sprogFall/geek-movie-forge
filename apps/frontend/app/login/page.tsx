@@ -1,7 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
+
 import { useAuth } from "@/lib/auth";
 
 const REMEMBER_KEY = "gmf_remember";
@@ -11,8 +12,8 @@ const ERROR_MAP: Record<string, string> = {
   "Username already exists": "该用户名已被注册",
 };
 
-function friendlyError(msg: string): string {
-  return ERROR_MAP[msg] ?? msg;
+function friendlyError(message: string): string {
+  return ERROR_MAP[message] ?? message;
 }
 
 export default function LoginPage() {
@@ -26,23 +27,22 @@ export default function LoginPage() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem(REMEMBER_KEY);
-      if (saved) {
-        const data = JSON.parse(saved);
-        setUsername(data.username ?? "");
-        setPassword(data.password ?? "");
-        setRemember(true);
-      }
+      if (!saved) return;
+
+      const data = JSON.parse(saved);
+      setUsername(data.username ?? "");
+      setPassword(data.password ?? "");
+      setRemember(true);
     } catch {
       // ignore corrupt data
     }
   }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
     setLoading(true);
     setError("");
 
-    // 在登录前保存/清除记住的凭证（登录成功后会导航离开）
     if (remember) {
       localStorage.setItem(REMEMBER_KEY, JSON.stringify({ username, password }));
     } else {
@@ -70,10 +70,10 @@ export default function LoginPage() {
             </div>
           </div>
           <h1>登录</h1>
-          <p>请输入账号密码以进入控制台。</p>
+          <p>请输入账号和密码，进入控制台。</p>
         </div>
 
-        {error && <div className="error-banner">{error}</div>}
+        {error ? <div className="error-banner">{error}</div> : null}
 
         <div className="form-stack">
           <div className="form-group">
@@ -85,7 +85,7 @@ export default function LoginPage() {
               className="form-input"
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(event) => setUsername(event.target.value)}
               placeholder="请输入用户名"
               autoComplete="username"
               required
@@ -101,7 +101,7 @@ export default function LoginPage() {
               className="form-input"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
               placeholder="请输入密码"
               autoComplete="current-password"
               required
@@ -113,20 +113,20 @@ export default function LoginPage() {
               id="remember"
               type="checkbox"
               checked={remember}
-              onChange={(e) => setRemember(e.target.checked)}
+              onChange={(event) => setRemember(event.target.checked)}
             />
             <label htmlFor="remember">记住密码</label>
           </div>
 
           <button className="btn btn-primary auth-btn" type="submit" disabled={loading}>
-            {loading && <span className="spinner" />}
+            {loading ? <span className="spinner" /> : null}
             {loading ? "正在登录..." : "登录"}
           </button>
         </div>
 
         <p className="auth-footer">
           还没有账号？{" "}
-          <Link href="/register" className="auth-link">
+          <Link to="/register" className="auth-link">
             去注册
           </Link>
         </p>

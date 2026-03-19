@@ -1,7 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
+
 import { useAuth } from "@/lib/auth";
 
 export default function RegisterPage() {
@@ -12,12 +13,13 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
     if (password !== confirmPassword) {
       setError("两次输入的密码不一致");
       return;
     }
+
     setLoading(true);
     setError("");
     try {
@@ -41,10 +43,10 @@ export default function RegisterPage() {
             </div>
           </div>
           <h1>注册</h1>
-          <p>创建账号后即可使用制作控制台。</p>
+          <p>创建账号后即可进入控制台并开始使用。</p>
         </div>
 
-        {error && <div className="error-banner">{error}</div>}
+        {error ? <div className="error-banner">{error}</div> : null}
 
         <div className="form-stack">
           <div className="form-group">
@@ -56,7 +58,7 @@ export default function RegisterPage() {
               className="form-input"
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(event) => setUsername(event.target.value)}
               placeholder="至少 2 个字符"
               autoComplete="username"
               required
@@ -73,7 +75,7 @@ export default function RegisterPage() {
               className="form-input"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
               placeholder="至少 6 个字符"
               autoComplete="new-password"
               required
@@ -90,7 +92,7 @@ export default function RegisterPage() {
               className="form-input"
               type="password"
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              onChange={(event) => setConfirmPassword(event.target.value)}
               placeholder="请再次输入密码"
               autoComplete="new-password"
               required
@@ -99,14 +101,14 @@ export default function RegisterPage() {
           </div>
 
           <button className="btn btn-primary auth-btn" type="submit" disabled={loading}>
-            {loading && <span className="spinner" />}
+            {loading ? <span className="spinner" /> : null}
             {loading ? "正在创建账号..." : "创建账号"}
           </button>
         </div>
 
         <p className="auth-footer">
           已有账号？{" "}
-          <Link href="/login" className="auth-link">
+          <Link to="/login" className="auth-link">
             去登录
           </Link>
         </p>

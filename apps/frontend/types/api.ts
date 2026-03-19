@@ -175,7 +175,7 @@ export type AssetSaveOptions = {
   tags?: string[];
 };
 
-/* 鈹€鈹€ Projects 鈹€鈹€ */
+/* ── Projects ── */
 
 export type ProjectStatus = "draft" | "active" | "review" | "completed" | "archived";
 
@@ -202,7 +202,7 @@ export type ProjectListResponse = {
   items: ProjectResponse[];
 };
 
-/* 鈹€鈹€ Tasks 鈹€鈹€ */
+/* ── Tasks ── */
 
 export type TaskCreateRequest = {
   project_id: string;
