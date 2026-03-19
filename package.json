@@ -7,8 +7,12 @@
     "apps/remotion_renderer"
   ],
   "scripts": {
+    "postinstall": "node ./scripts/repair-gen-mapping.cjs",
+    "predev:frontend": "node ./scripts/repair-gen-mapping.cjs",
     "dev:frontend": "npm run dev --workspace @geek-movie-forge/frontend",
+    "prebuild:frontend": "node ./scripts/repair-gen-mapping.cjs",
     "build:frontend": "npm run build --workspace @geek-movie-forge/frontend",
+    "prestart:frontend": "node ./scripts/repair-gen-mapping.cjs",
     "start:frontend": "npm run start --workspace @geek-movie-forge/frontend",
     "dev:remotion": "npm run dev --workspace @geek-movie-forge/remotion-renderer",
     "start:remotion": "npm run start --workspace @geek-movie-forge/remotion-renderer"
