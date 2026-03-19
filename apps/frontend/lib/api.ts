@@ -13,6 +13,7 @@ import type {
   TextGenerationResponse,
   MultiVideoPlanResponse,
   MultiVideoGenerationResponse,
+  MultiVideoSegmentGenerationResult,
   CallLogListResponse,
   CallLogResponse,
 } from "@/types/api";
@@ -227,6 +228,14 @@ export function planMultiVideos(body: Record<string, unknown>) {
 
 export function generateMultiVideos(body: Record<string, unknown>) {
   return request<MultiVideoGenerationResponse>("/api/v1/generations/videos/batch", {
+    method: "POST",
+    body: JSON.stringify(body),
+    timeout: LONG_TIMEOUT,
+  });
+}
+
+export function regenerateMultiVideoSegment(body: Record<string, unknown>) {
+  return request<MultiVideoSegmentGenerationResult>("/api/v1/generations/videos/segments/regenerate", {
     method: "POST",
     body: JSON.stringify(body),
     timeout: LONG_TIMEOUT,

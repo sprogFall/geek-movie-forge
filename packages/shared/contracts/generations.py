@@ -132,6 +132,7 @@ class VideoSegmentPlan(BaseModel):
     duration_seconds: int = Field(ge=1, le=120)
     visual_prompt: str = Field(min_length=1)
     narration_text: str = Field(min_length=1)
+    use_previous_segment_last_frame: bool = False
 
 
 class MultiVideoPlanRequest(BaseModel):
@@ -183,6 +184,15 @@ class MultiVideoGenerationRequest(BaseModel):
     save: AssetSaveOptions = Field(default_factory=AssetSaveOptions)
     options: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def validate_segment_frame_links(self) -> Self:
+        for index, segment in enumerate(self.segments):
+            if index == 0 and segment.use_previous_segment_last_frame:
+                raise ValueError(
+                    "first segment cannot enable use_previous_segment_last_frame"
+                )
+        return self
+
 
 class MultiVideoSegmentRegenerationRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -196,6 +206,8 @@ class MultiVideoSegmentRegenerationRequest(BaseModel):
     image_material_urls: list[str] = Field(default_factory=list)
     scene_prompt_asset_ids: list[str] = Field(default_factory=list)
     scene_prompt_texts: list[str] = Field(default_factory=list)
+    previous_segment_last_frame_url: str | None = None
+    previous_segment_last_frame_base64: str | None = None
     save: AssetSaveOptions = Field(default_factory=AssetSaveOptions)
     options: dict[str, Any] = Field(default_factory=dict)
 
@@ -257,6 +269,7 @@ class MultiVideoSegmentGenerationResult(BaseModel):
     duration_seconds: int = Field(ge=1)
     visual_prompt: str
     narration_text: str
+    use_previous_segment_last_frame: bool = False
     resolved_prompt: str
     status: Literal["success", "error"]
     generation: MediaGenerationResponse | None = None

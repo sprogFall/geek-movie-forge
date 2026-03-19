@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import math
@@ -125,61 +124,22 @@ class GenerationService:
             VideoInputMaterial(kind="url", value=value)
             for value in payload.image_material_urls
         )
-        image_urls = [item.value for item in image_materials if item.kind == "url"]
-        image_base64 = [item.value for item in image_materials if item.kind == "base64"]
         scene_prompt_texts = self._resolve_scene_prompt_materials(
             owner_id,
             payload.scene_prompt_asset_ids,
         )
         scene_prompt_texts.extend(payload.scene_prompt_texts)
-        base_prompt = _merge_prompt(payload.preset_prompt, payload.prompt) or None
-        resolved_prompt = _build_video_resolved_prompt(base_prompt, scene_prompt_texts)
-
-        gateway_payload = VideoGenerationPayload(
-            provider_id=payload.provider_id,
+        return await self._generate_video_with_resolved_inputs(
+            owner_id=owner_id,
+            provider=provider,
             model=payload.model,
             count=payload.count,
             prompt=payload.prompt,
             preset_prompt=payload.preset_prompt,
-            resolved_prompt=resolved_prompt,
             image_materials=image_materials,
-            image_material_urls=image_urls,
-            image_material_base64=image_base64,
             scene_prompt_texts=scene_prompt_texts,
-            options=_build_video_generation_options(
-                payload.options,
-                provider_adapter_type=provider.adapter_type,
-            ),
-        )
-        provider_result = await self._log_and_call(
-            owner_id=owner_id,
-            provider=provider,
-            model=payload.model,
-            capability=ModelCapability.VIDEO,
-            request_summary=gateway_payload.resolved_prompt or "",
-            coro=self._provider_gateway.generate_video(provider, gateway_payload),
-        )
-        saved_assets = self._save_media_assets(
-            owner_id=owner_id,
-            capability=ModelCapability.VIDEO,
-            provider_id=provider.provider_id,
-            model=payload.model,
-            outputs=provider_result.outputs,
-            category=payload.save.category,
-            name_prefix=payload.save.name_prefix,
-            tags=payload.save.tags,
-            enabled=payload.save.enabled,
-        )
-        return MediaGenerationResponse(
-            generation_id=f"gen_{uuid4().hex[:12]}",
-            capability=ModelCapability.VIDEO,
-            provider_id=payload.provider_id,
-            model=payload.model,
-            resolved_prompt=resolved_prompt or "",
-            provider_request_id=provider_result.provider_request_id,
-            outputs=provider_result.outputs,
-            usage=_extract_usage(provider_result),
-            saved_assets=saved_assets,
+            save=payload.save,
+            options=payload.options,
         )
 
     async def generate_text(
@@ -360,24 +320,38 @@ class GenerationService:
             payload.scene_prompt_asset_ids,
         )
         global_scene_prompt_texts.extend(payload.scene_prompt_texts)
-        tasks = [
-            self._generate_multi_video_segment(
+        base_image_materials = self._resolve_image_materials(
+            owner_id,
+            payload.image_material_asset_ids,
+        )
+        base_image_materials.extend(
+            VideoInputMaterial(kind="url", value=value)
+            for value in payload.image_material_urls
+        )
+        segments: list[MultiVideoSegmentGenerationResult] = []
+        previous_segment_last_frame: VideoInputMaterial | None = None
+        for segment in payload.segments:
+            segment_image_materials = _build_multi_video_segment_image_materials(
+                base_materials=base_image_materials,
+                previous_segment_last_frame=previous_segment_last_frame,
+                segment=segment,
+                provider_adapter_type=provider.adapter_type,
+            )
+            segment_result = await self._generate_multi_video_segment(
                 owner_id=owner_id,
-                provider_id=payload.provider_id,
+                provider=provider,
                 model=payload.model,
                 prompt=payload.prompt,
                 preset_prompt=payload.preset_prompt,
                 segment=segment,
-                image_material_asset_ids=payload.image_material_asset_ids,
-                image_material_urls=payload.image_material_urls,
+                image_materials=segment_image_materials,
                 scene_prompt_texts=global_scene_prompt_texts,
                 provider_adapter_type=provider.adapter_type,
                 save=payload.save,
                 options=payload.options,
             )
-            for segment in payload.segments
-        ]
-        segments = await asyncio.gather(*tasks)
+            segments.append(segment_result)
+            previous_segment_last_frame = _extract_last_frame_material(segment_result)
         return MultiVideoGenerationResponse(
             batch_id=f"batch_{uuid4().hex[:12]}",
             provider_id=payload.provider_id,
@@ -403,15 +377,32 @@ class GenerationService:
             payload.scene_prompt_asset_ids,
         )
         scene_prompt_texts.extend(payload.scene_prompt_texts)
+        image_materials = self._resolve_image_materials(
+            owner_id,
+            payload.image_material_asset_ids,
+        )
+        image_materials.extend(
+            VideoInputMaterial(kind="url", value=value)
+            for value in payload.image_material_urls
+        )
+        previous_segment_last_frame = _resolve_previous_segment_last_frame(
+            url=payload.previous_segment_last_frame_url,
+            base64_data=payload.previous_segment_last_frame_base64,
+        )
+        segment_image_materials = _build_multi_video_segment_image_materials(
+            base_materials=image_materials,
+            previous_segment_last_frame=previous_segment_last_frame,
+            segment=payload.segment,
+            provider_adapter_type=provider.adapter_type,
+        )
         return await self._generate_multi_video_segment(
             owner_id=owner_id,
-            provider_id=payload.provider_id,
+            provider=provider,
             model=payload.model,
             prompt=payload.prompt,
             preset_prompt=payload.preset_prompt,
             segment=payload.segment,
-            image_material_asset_ids=payload.image_material_asset_ids,
-            image_material_urls=payload.image_material_urls,
+            image_materials=segment_image_materials,
             scene_prompt_texts=scene_prompt_texts,
             provider_adapter_type=provider.adapter_type,
             save=payload.save,
@@ -504,17 +495,82 @@ class GenerationService:
                 raise
             raise UpstreamServiceError(f"Provider call failed: {exc}") from exc
 
+    async def _generate_video_with_resolved_inputs(
+        self,
+        *,
+        owner_id: str,
+        provider: ProviderRecord,
+        model: str,
+        count: int,
+        prompt: str | None,
+        preset_prompt: str | None,
+        image_materials: list[VideoInputMaterial],
+        scene_prompt_texts: list[str],
+        save,
+        options: dict,
+    ) -> MediaGenerationResponse:
+        image_urls = [item.value for item in image_materials if item.kind == "url"]
+        image_base64 = [item.value for item in image_materials if item.kind == "base64"]
+        base_prompt = _merge_prompt(preset_prompt, prompt) or None
+        resolved_prompt = _build_video_resolved_prompt(base_prompt, scene_prompt_texts)
+
+        gateway_payload = VideoGenerationPayload(
+            provider_id=provider.provider_id,
+            model=model,
+            count=count,
+            prompt=prompt,
+            preset_prompt=preset_prompt,
+            resolved_prompt=resolved_prompt,
+            image_materials=image_materials,
+            image_material_urls=image_urls,
+            image_material_base64=image_base64,
+            scene_prompt_texts=scene_prompt_texts,
+            options=_build_video_generation_options(
+                options,
+                provider_adapter_type=provider.adapter_type,
+            ),
+        )
+        provider_result = await self._log_and_call(
+            owner_id=owner_id,
+            provider=provider,
+            model=model,
+            capability=ModelCapability.VIDEO,
+            request_summary=gateway_payload.resolved_prompt or "",
+            coro=self._provider_gateway.generate_video(provider, gateway_payload),
+        )
+        saved_assets = self._save_media_assets(
+            owner_id=owner_id,
+            capability=ModelCapability.VIDEO,
+            provider_id=provider.provider_id,
+            model=model,
+            outputs=provider_result.outputs,
+            category=save.category,
+            name_prefix=save.name_prefix,
+            tags=save.tags,
+            enabled=save.enabled,
+        )
+        return MediaGenerationResponse(
+            generation_id=f"gen_{uuid4().hex[:12]}",
+            capability=ModelCapability.VIDEO,
+            provider_id=provider.provider_id,
+            model=model,
+            resolved_prompt=resolved_prompt or "",
+            provider_request_id=provider_result.provider_request_id,
+            outputs=provider_result.outputs,
+            usage=_extract_usage(provider_result),
+            saved_assets=saved_assets,
+        )
+
     async def _generate_multi_video_segment(
         self,
         *,
         owner_id: str,
-        provider_id: str,
+        provider: ProviderRecord,
         model: str,
         prompt: str,
         preset_prompt: str | None,
         segment: VideoSegmentPlan,
-        image_material_asset_ids: list[str],
-        image_material_urls: list[str],
+        image_materials: list[VideoInputMaterial],
         scene_prompt_texts: list[str],
         provider_adapter_type: str,
         save,
@@ -529,6 +585,7 @@ class GenerationService:
             options,
             segment,
             provider_adapter_type=provider_adapter_type,
+            image_material_count=len(image_materials),
         )
         if save.enabled:
             name_prefix = save.name_prefix or "multi-video"
@@ -539,19 +596,17 @@ class GenerationService:
             segment_save = save
 
         try:
-            generation = await self.generate_video(
-                owner_id,
-                VideoGenerationRequest(
-                    provider_id=provider_id,
-                    model=model,
-                    count=1,
-                    prompt=segment_prompt,
-                    image_material_asset_ids=image_material_asset_ids,
-                    image_material_urls=image_material_urls,
-                    scene_prompt_texts=scene_prompt_texts,
-                    save=segment_save,
-                    options=segment_options,
-                ),
+            generation = await self._generate_video_with_resolved_inputs(
+                owner_id=owner_id,
+                provider=provider,
+                model=model,
+                count=1,
+                prompt=segment_prompt,
+                preset_prompt=None,
+                image_materials=image_materials,
+                scene_prompt_texts=scene_prompt_texts,
+                save=segment_save,
+                options=segment_options,
             )
             return MultiVideoSegmentGenerationResult(
                 segment_index=segment.segment_index,
@@ -559,6 +614,7 @@ class GenerationService:
                 duration_seconds=segment.duration_seconds,
                 visual_prompt=segment.visual_prompt,
                 narration_text=segment.narration_text,
+                use_previous_segment_last_frame=segment.use_previous_segment_last_frame,
                 resolved_prompt=generation.resolved_prompt,
                 status="success",
                 generation=generation,
@@ -571,6 +627,7 @@ class GenerationService:
                 duration_seconds=segment.duration_seconds,
                 visual_prompt=segment.visual_prompt,
                 narration_text=segment.narration_text,
+                use_previous_segment_last_frame=segment.use_previous_segment_last_frame,
                 resolved_prompt=segment_prompt,
                 status="error",
                 error_detail=exc.detail,
@@ -883,6 +940,7 @@ def _build_multi_video_segment_options(
     segment: VideoSegmentPlan,
     *,
     provider_adapter_type: str,
+    image_material_count: int,
 ) -> dict:
     segment_options = _build_video_generation_options(
         options,
@@ -890,6 +948,15 @@ def _build_multi_video_segment_options(
     )
     segment_options.setdefault("duration", segment.duration_seconds)
     segment_options.setdefault("duration_seconds", segment.duration_seconds)
+    if (
+        provider_adapter_type == "volcengine_ark"
+        and segment.use_previous_segment_last_frame
+        and "input_mode" not in segment_options
+    ):
+        if image_material_count <= 1:
+            segment_options["input_mode"] = "first_frame"
+        else:
+            segment_options["input_mode"] = "first_last_frame"
     return segment_options
 
 
@@ -900,8 +967,75 @@ def _build_video_generation_options(
 ) -> dict:
     enriched = dict(options)
     if provider_adapter_type == "volcengine_ark":
-        enriched.setdefault("generate_audio", True)
+        enriched["generate_audio"] = True
     return enriched
+
+
+def _build_multi_video_segment_image_materials(
+    *,
+    base_materials: list[VideoInputMaterial],
+    previous_segment_last_frame: VideoInputMaterial | None,
+    segment: VideoSegmentPlan,
+    provider_adapter_type: str,
+) -> list[VideoInputMaterial]:
+    materials = list(base_materials)
+    if not segment.use_previous_segment_last_frame or previous_segment_last_frame is None:
+        return materials
+
+    stitched_materials = [previous_segment_last_frame, *materials]
+    if provider_adapter_type != "volcengine_ark":
+        return stitched_materials
+
+    # Volcengine first/last-frame mode only accepts up to 2 images.
+    return stitched_materials[:2]
+
+
+def _extract_last_frame_material(
+    segment: MultiVideoSegmentGenerationResult,
+) -> VideoInputMaterial | None:
+    if segment.status != "success" or segment.generation is None:
+        return None
+    for output in segment.generation.outputs:
+        metadata = output.metadata or {}
+        last_frame_url = _coerce_plan_text(
+            metadata.get("last_frame_url")
+            or metadata.get("end_frame_url")
+            or metadata.get("tail_frame_url")
+        )
+        if last_frame_url:
+            return VideoInputMaterial(kind="url", value=last_frame_url)
+        last_frame_base64 = _coerce_plan_text(
+            metadata.get("last_frame_base64")
+            or metadata.get("end_frame_base64")
+            or metadata.get("tail_frame_base64")
+        )
+        if last_frame_base64:
+            return VideoInputMaterial(
+                kind="base64",
+                value=_normalize_image_data_uri(last_frame_base64, "image/png"),
+            )
+        if output.cover_image_url:
+            return VideoInputMaterial(kind="url", value=output.cover_image_url)
+    return None
+
+
+def _resolve_previous_segment_last_frame(
+    *,
+    url: str | None,
+    base64_data: str | None,
+) -> VideoInputMaterial | None:
+    normalized_url = _coerce_plan_text(url)
+    if normalized_url:
+        return VideoInputMaterial(kind="url", value=normalized_url)
+
+    normalized_base64 = _coerce_plan_text(base64_data)
+    if normalized_base64:
+        return VideoInputMaterial(
+            kind="base64",
+            value=_normalize_image_data_uri(normalized_base64, "image/png"),
+        )
+
+    return None
 
 
 def _extract_usage(result: object) -> GenerationTokenUsage | None:

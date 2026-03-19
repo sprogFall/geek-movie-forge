@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   createAsset,
   generateMultiVideos,
+  regenerateMultiVideoSegment,
   generateVideos,
   listAssets,
   listProviders,
@@ -17,6 +18,7 @@ import type {
   MultiVideoPlanResponse,
   MultiVideoSegmentGenerationResult,
   ProviderResponse,
+  VideoSegmentPlan,
 } from "@/types/api";
 
 type GenerationMode = "single" | "multi";
@@ -51,7 +53,6 @@ export function VideoGenForm() {
   const [mode, setMode] = useState<GenerationMode>("single");
   const [prompt, setPrompt] = useState("");
   const [count, setCount] = useState(1);
-  const [generateAudio, setGenerateAudio] = useState(true);
   const [imageMaterialUrls, setImageMaterialUrls] = useState("");
   const [imageMaterialAssetIds, setImageMaterialAssetIds] = useState<string[]>([]);
   const [scenePromptTextInput, setScenePromptTextInput] = useState("");
@@ -135,6 +136,7 @@ export function VideoGenForm() {
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean);
+  const plannedSegments = plan?.segments ?? [];
 
   const activeSegment =
     batchResult?.segments.find((segment) => segment.segment_index === activeSegmentIndex) ?? null;
@@ -252,7 +254,7 @@ export function VideoGenForm() {
       model,
     };
     if (selectedVideoProvider?.adapter_type === "volcengine_ark") {
-      body.options = { generate_audio: generateAudio };
+      body.options = { generate_audio: true };
     }
     if (prompt.trim()) {
       body.prompt = prompt.trim();
@@ -351,26 +353,30 @@ export function VideoGenForm() {
     setSegmentRefreshing((prev) => ({ ...prev, [segment.segment_index]: true }));
     setError("");
     try {
-      const response = await generateMultiVideos({
+      const previousSegment =
+        batchResult?.segments.find((item) => item.segment_index === segment.segment_index - 1) ?? null;
+      const previousOutput = previousSegment?.generation?.outputs[0] ?? null;
+      const previousLastFrameUrl = getLastFrameUrl(previousOutput);
+      const response = await regenerateMultiVideoSegment({
         ...buildCommonVideoPayload(),
         prompt: prompt.trim(),
-        segments: [
-          {
-            segment_index: segment.segment_index,
-            title: segment.title,
-            duration_seconds: segment.duration_seconds,
-            visual_prompt: segment.visual_prompt,
-            narration_text: segment.narration_text,
-          },
-        ],
+        segment: {
+          segment_index: segment.segment_index,
+          title: segment.title,
+          duration_seconds: segment.duration_seconds,
+          visual_prompt: segment.visual_prompt,
+          narration_text: segment.narration_text,
+          use_previous_segment_last_frame: segment.use_previous_segment_last_frame ?? false,
+        },
+        previous_segment_last_frame_url:
+          segment.use_previous_segment_last_frame ? previousLastFrameUrl : null,
       });
-      const updatedSegment = response.segments[0];
       setBatchResult((prev) =>
         prev
           ? {
               ...prev,
               segments: prev.segments.map((item) =>
-                item.segment_index === updatedSegment.segment_index ? updatedSegment : item
+                item.segment_index === response.segment_index ? response : item
               ),
             }
           : prev
@@ -502,6 +508,28 @@ export function VideoGenForm() {
     setSaveError("");
   }
 
+  function toggleSegmentBridge(segmentIndex: number) {
+    setPlan((prev) =>
+      prev
+        ? {
+            ...prev,
+            segments: prev.segments.map((segment) =>
+              segment.segment_index === segmentIndex
+                ? {
+                    ...segment,
+                    use_previous_segment_last_frame: !segment.use_previous_segment_last_frame,
+                  }
+                : segment
+            ),
+          }
+        : prev
+    );
+  }
+
+  function getSegmentBridgeLabel(segment: VideoSegmentPlan) {
+    return segment.use_previous_segment_last_frame ? "已衔接首尾帧" : "衔接首尾帧";
+  }
+
   function renderSelectedTextAssets() {
     if (selectedTextAssets.length === 0) return null;
     return (
@@ -526,8 +554,11 @@ export function VideoGenForm() {
   }
 
   return (
-    <div className="gen-layout">
-      <form className="panel form-stack" onSubmit={mode === "single" ? handleSingleSubmit : handlePlanSubmit}>
+    <div className="gen-layout gen-layout-video">
+      <form
+        className="panel form-stack gen-sidebar-panel"
+        onSubmit={mode === "single" ? handleSingleSubmit : handlePlanSubmit}
+      >
         <div className="mode-switch">
           <button
             className={`mode-switch-btn${mode === "single" ? " is-active" : ""}`}
@@ -686,23 +717,6 @@ export function VideoGenForm() {
           />
         </div>
 
-        {selectedVideoProvider?.adapter_type === "volcengine_ark" && (
-          <div className="form-group">
-            <label className="form-label">音频</label>
-            <label className="form-check">
-              <input
-                type="checkbox"
-                checked={generateAudio}
-                onChange={(e) => setGenerateAudio(e.target.checked)}
-              />
-              <span>生成音频/旁白</span>
-            </label>
-            <span className="form-hint">
-              关闭后会生成无音轨视频，浏览器播放器中的音量按钮也会不可用。
-            </span>
-          </div>
-        )}
-
         <div className="form-group">
           <label className="form-label">文本素材 / 剧情补充</label>
           <span className="form-hint">
@@ -844,7 +858,7 @@ export function VideoGenForm() {
         </div>
       </form>
 
-      <div className="gen-results">
+      <div className="gen-results gen-results-scroll">
         {error && <div className="error-banner">{error}</div>}
 
         <div className="panel form-stack">
@@ -945,17 +959,38 @@ export function VideoGenForm() {
               {plan.usage?.total_tokens != null ? ` ${plan.usage.total_tokens}` : " 暂无"}
             </div>
             <div className="segment-plan-list">
-              {plan.segments.map((segment) => (
-                <article key={segment.segment_index} className="segment-plan-card">
-                  <div className="segment-plan-card-head">
-                    <strong>
-                      第 {segment.segment_index} 段 · {segment.title}
-                    </strong>
-                    <span className="tag-pill">{segment.duration_seconds}s</span>
-                  </div>
-                  <p className="segment-plan-copy">{segment.visual_prompt}</p>
-                  <p className="segment-plan-copy is-script">{segment.narration_text}</p>
-                </article>
+              {plannedSegments.map((segment, index) => (
+                <div key={segment.segment_index} className="segment-plan-flow">
+                  <article className="segment-plan-card">
+                    <div className="segment-plan-card-head">
+                      <strong>
+                        第 {segment.segment_index} 段 · {segment.title}
+                      </strong>
+                      <span className="tag-pill">{segment.duration_seconds}s</span>
+                    </div>
+                    <p className="segment-plan-copy">{segment.visual_prompt}</p>
+                    <p className="segment-plan-copy is-script">{segment.narration_text}</p>
+                  </article>
+                  {index < plannedSegments.length - 1 && (
+                    <div className="segment-bridge-toggle-wrap">
+                      <button
+                        className={`segment-bridge-toggle${
+                          plannedSegments[index + 1]?.use_previous_segment_last_frame ? " is-active" : ""
+                        }`}
+                        type="button"
+                        onClick={() => toggleSegmentBridge(plannedSegments[index + 1].segment_index)}
+                      >
+                        <span className="segment-bridge-toggle-line" aria-hidden="true" />
+                        <span className="segment-bridge-toggle-copy">
+                          第 {segment.segment_index} 段尾帧 → 第 {plannedSegments[index + 1].segment_index} 段首帧
+                        </span>
+                        <span className="segment-bridge-toggle-state">
+                          {getSegmentBridgeLabel(plannedSegments[index + 1])}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           </section>
@@ -1319,4 +1354,25 @@ function triggerDownload(url: string, filename: string) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+function getLastFrameUrl(
+  output:
+    | {
+        cover_image_url: string | null;
+        metadata: Record<string, unknown>;
+      }
+    | null
+) {
+  if (!output) return null;
+  const metadata = output.metadata ?? {};
+  const metadataLastFrame =
+    typeof metadata.last_frame_url === "string"
+      ? metadata.last_frame_url
+      : typeof metadata.end_frame_url === "string"
+        ? metadata.end_frame_url
+        : typeof metadata.tail_frame_url === "string"
+          ? metadata.tail_frame_url
+          : null;
+  return metadataLastFrame ?? output.cover_image_url ?? null;
 }

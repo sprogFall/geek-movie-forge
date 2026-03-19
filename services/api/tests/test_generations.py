@@ -498,7 +498,7 @@ def test_generate_multi_video_isolates_segment_prompts_and_enables_audio_by_defa
     assert all(item["generate_audio"] is True for item in options)
 
 
-def test_generate_multi_video_preserves_explicit_generate_audio_false() -> None:
+def test_generate_multi_video_forces_generate_audio_true_even_when_false_requested() -> None:
     recording_gateway = RecordingVideoGateway()
 
     with TestClient(app) as client:
@@ -532,7 +532,95 @@ def test_generate_multi_video_preserves_explicit_generate_audio_false() -> None:
 
     assert response.status_code == 200
     assert len(recording_gateway.video_payloads) == 1
-    assert recording_gateway.video_payloads[0]["payload"].options["generate_audio"] is False
+    assert recording_gateway.video_payloads[0]["payload"].options["generate_audio"] is True
+
+
+def test_generate_multi_video_supports_mixed_frame_stitching_and_preserves_material_order() -> None:
+    recording_gateway = RecordingVideoGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=recording_gateway,
+        )
+        provider_id = _create_provider(client, headers, adapter_type="volcengine_ark")
+        reference_asset = client.post(
+            "/api/v1/assets",
+            json={
+                "asset_type": "image",
+                "category": "reference",
+                "name": "base-ref",
+                "content_base64": "YmFzZS1yZWY=",
+                "mime_type": "image/png",
+            },
+            headers=headers,
+        )
+        assert reference_asset.status_code == 201
+
+        response = client.post(
+            "/api/v1/generations/videos/batch",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "prompt": "连续叙事短片",
+                "image_material_asset_ids": [reference_asset.json()["asset_id"]],
+                "segments": [
+                    {
+                        "segment_index": 1,
+                        "title": "第一段",
+                        "duration_seconds": 8,
+                        "visual_prompt": "雨夜街头开场",
+                        "narration_text": "主角在街口停步。",
+                        "use_previous_segment_last_frame": False,
+                    },
+                    {
+                        "segment_index": 2,
+                        "title": "第二段",
+                        "duration_seconds": 9,
+                        "visual_prompt": "镜头接上并快速推近",
+                        "narration_text": "镜头从上段尾帧自然衔接推进。",
+                        "use_previous_segment_last_frame": True,
+                    },
+                    {
+                        "segment_index": 3,
+                        "title": "第三段",
+                        "duration_seconds": 7,
+                        "visual_prompt": "切到远景收束",
+                        "narration_text": "节奏放缓并收尾。",
+                        "use_previous_segment_last_frame": False,
+                    },
+                ],
+                "options": {"generate_audio": False},
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    assert len(recording_gateway.video_payloads) == 3
+
+    payload_1 = recording_gateway.video_payloads[0]["payload"]
+    payload_2 = recording_gateway.video_payloads[1]["payload"]
+    payload_3 = recording_gateway.video_payloads[2]["payload"]
+
+    assert [item.kind for item in payload_1.image_materials] == ["base64"]
+    assert [item.kind for item in payload_2.image_materials] == ["url", "base64"]
+    assert payload_2.image_materials[0].value == "https://cdn.example.com/generated/video-1-cover.png"
+    assert [item.kind for item in payload_3.image_materials] == ["base64"]
+
+    assert payload_1.options["duration_seconds"] == 8
+    assert payload_2.options["duration_seconds"] == 9
+    assert payload_3.options["duration_seconds"] == 7
+    assert payload_1.options["duration"] == 8
+    assert payload_2.options["duration"] == 9
+    assert payload_3.options["duration"] == 7
+    assert payload_2.options["input_mode"] == "first_last_frame"
+    assert "input_mode" not in payload_1.options
+    assert "input_mode" not in payload_3.options
+    assert payload_1.options["generate_audio"] is True
+    assert payload_2.options["generate_audio"] is True
+    assert payload_3.options["generate_audio"] is True
 
 
 def test_generate_video_enables_audio_by_default_for_volcengine_ark() -> None:
@@ -561,6 +649,43 @@ def test_generate_video_enables_audio_by_default_for_volcengine_ark() -> None:
     assert response.status_code == 200
     assert fake_gateway.last_video_payload is not None
     assert fake_gateway.last_video_payload["payload"].options["generate_audio"] is True
+
+
+def test_generate_multi_video_rejects_first_segment_frame_stitching_toggle() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, headers, adapter_type="volcengine_ark")
+        response = client.post(
+            "/api/v1/generations/videos/batch",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "prompt": "非法首段衔接",
+                "segments": [
+                    {
+                        "segment_index": 1,
+                        "title": "第一段",
+                        "duration_seconds": 8,
+                        "visual_prompt": "街头开场",
+                        "narration_text": "主角驻足街口。",
+                        "use_previous_segment_last_frame": True,
+                    }
+                ],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 422
+    assert "first segment cannot enable use_previous_segment_last_frame" in str(
+        response.json()["detail"]
+    )
 
 
 def test_regenerate_multi_video_segment_returns_single_result() -> None:

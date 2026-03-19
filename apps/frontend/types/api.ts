@@ -118,6 +118,7 @@ export type VideoSegmentPlan = {
   visual_prompt: string;
   narration_text: string;
   duration_seconds: number;
+  use_previous_segment_last_frame?: boolean;
 };
 
 export type MultiVideoPlanResponse = {
@@ -140,6 +141,7 @@ export type MultiVideoSegmentGenerationResult = {
   duration_seconds: number;
   visual_prompt: string;
   narration_text: string;
+  use_previous_segment_last_frame?: boolean;
   resolved_prompt: string;
   status: "success" | "error";
   generation: MediaGenerationResponse | null;
