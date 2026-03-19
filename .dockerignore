@@ -5,10 +5,16 @@
 .pyright
 .venv
 node_modules
+**/node_modules
 .next
+**/.next
 coverage
 dist
+**/dist
+out
+**/out
 build
+**/build
 __pycache__
 *.pyc
 .env

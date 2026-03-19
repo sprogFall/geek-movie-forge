@@ -3,8 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build && node ./scripts/prepare-standalone.cjs",
-    "start": "node ./.next/standalone/apps/frontend/server.js",
+    "build": "rm -rf .next out dist && next build && node ./scripts/prepare-static-dist.cjs",
+    "start": "python3 -m http.server 3000 -d dist",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },

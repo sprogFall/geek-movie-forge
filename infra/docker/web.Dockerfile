@@ -1,18 +1,25 @@
-FROM node:22-alpine
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-COPY apps/frontend/package.json ./package.json
-COPY apps/frontend/tsconfig.json ./tsconfig.json
-COPY apps/frontend/next-env.d.ts ./next-env.d.ts
-COPY apps/frontend/next.config.ts ./next.config.ts
-COPY apps/frontend/app ./app
-COPY apps/frontend/components ./components
-COPY apps/frontend/lib ./lib
-COPY apps/frontend/types ./types
+ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 
-RUN npm install
+COPY package.json package-lock.json ./
+COPY apps/frontend/package.json ./apps/frontend/package.json
+COPY apps/remotion_renderer/package.json ./apps/remotion_renderer/package.json
+
+RUN npm ci
+
+COPY apps/frontend ./apps/frontend
+
+RUN npm run build --workspace @geek-movie-forge/frontend
+
+FROM nginx:1.29-alpine
+
+COPY infra/docker/nginx/frontend.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/apps/frontend/dist /usr/share/nginx/html
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev", "--", "--hostname", "0.0.0.0", "--port", "3000"]
+CMD ["nginx", "-g", "daemon off;"]

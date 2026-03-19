@@ -150,6 +150,8 @@ cp .env.example .env
 docker compose up --build
 ```
 
+说明：前端容器现在会在镜像构建阶段执行静态导出，并由 Nginx 直接托管 `dist`。如果 API 不是通过 `http://localhost:8000` 对浏览器暴露，请先在 `.env` 中设置 `NEXT_PUBLIC_API_BASE_URL`，再执行 `docker compose up --build`。
+
 如只想拉起最小链路：
 
 ```bash
@@ -233,11 +235,14 @@ python3 -m compileall services workers packages
 npm run build:frontend
 ```
 
+构建完成后，静态站点产物位于 `apps/frontend/dist/`。
+
 ## 环境变量说明（摘录）
 
 `.env.example` 提供了基础模板。你至少需要关注：
 
 - `APP_ENV`：运行环境，默认 `local`
+- `NEXT_PUBLIC_API_BASE_URL`：前端静态构建时写入的 API 基地址，默认 `http://localhost:8000`
 - `JWT_SECRET`：至少 32 字符；非 `local/test` 环境禁止使用默认值
 - `JWT_EXPIRE_MINUTES`：JWT 过期时间，默认 `1440`
 - `PERSIST_ENABLED` / `PERSIST_DIR`：是否启用本地 JSON 持久化，以及持久化目录（默认 `.data`）
