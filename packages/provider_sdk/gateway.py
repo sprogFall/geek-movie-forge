@@ -4,6 +4,7 @@ import asyncio
 import ipaddress
 import logging
 import os
+import socket
 import time
 from typing import Any, Protocol
 
@@ -459,11 +460,43 @@ def _ensure_outbound_provider_url_is_allowed(url: str) -> None:
             )
         return
 
-    try:
-        ip = ipaddress.ip_address(normalized_host)
-    except ValueError:
-        return
+    for ip in _resolve_host_ips(normalized_host):
+        _validate_resolved_ip(ip, allow_private=allow_private)
 
+def _resolve_host_ips(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        return [literal]
+
+    try:
+        results = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise ValidationServiceError(f"Provider URL host resolution failed: {host}") from exc
+
+    resolved: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    seen: set[str] = set()
+    for family, _, _, _, sockaddr in results:
+        if family not in (socket.AF_INET, socket.AF_INET6):
+            continue
+        raw_ip = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(raw_ip)
+        except ValueError:
+            continue
+        key = ip.compressed
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved.append(ip)
+    return resolved
+
+
+def _validate_resolved_ip(
+    ip: ipaddress.IPv4Address | ipaddress.IPv6Address, *, allow_private: bool
+) -> None:
     if ip.is_link_local:
         raise ValidationServiceError("Provider URL points to a link-local address which is not allowed")
     if ip.is_multicast:

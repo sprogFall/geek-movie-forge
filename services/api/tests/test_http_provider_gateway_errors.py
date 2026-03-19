@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from datetime import UTC, datetime
 
 import httpx
@@ -12,6 +13,24 @@ from packages.shared.contracts.generations import ImageGenerationPayload, TextGe
 from packages.shared.contracts.providers import ProviderModelConfig, ProviderRecord
 from packages.shared.enums.model_capability import ModelCapability
 from services.api.app.services.errors import UpstreamServiceError
+
+
+@pytest.fixture(autouse=True)
+def allow_public_test_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    host_ip_map = {
+        "provider.example.com": "93.184.216.34",
+        "alt.example.com": "93.184.216.35",
+        "api-inference.modelscope.cn": "47.246.20.201",
+    }
+    real_getaddrinfo = socket.getaddrinfo
+
+    def fake_getaddrinfo(host: str, port: int | None, *args, **kwargs):
+        ip = host_ip_map.get(host)
+        if ip is None:
+            return real_getaddrinfo(host, port, *args, **kwargs)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
 
 def _provider_record(

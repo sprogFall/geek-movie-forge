@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
-from packages.shared.contracts.providers import ProviderConfigCreateRequest
+from packages.shared.contracts.providers import (
+    ProviderConfigCreateRequest,
+    ProviderConfigUpdateRequest,
+)
 from services.api.app.core.store import JsonFileStore
 from services.api.app.services.provider_service import InMemoryProviderService
 
@@ -81,3 +84,66 @@ def test_delete_persists_removal(tmp_path: Path) -> None:
     items = service2.list_providers("user_001").items
     assert len(items) == 2
     assert all(item.is_builtin for item in items)
+
+
+def test_builtin_provider_api_key_refreshes_from_environment_after_restart(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = JsonFileStore(tmp_path)
+    monkeypatch.setenv("VOLCENGINE_ARK_API_KEY", "first-secret-key")
+
+    service = InMemoryProviderService(store=store)
+    first = next(
+        item
+        for item in service.list_providers("user_001").items
+        if item.is_builtin and item.adapter_type == "volcengine_ark"
+    )
+    assert first.api_key_masked.startswith("fir")
+
+    monkeypatch.setenv("VOLCENGINE_ARK_API_KEY", "rotated-secret-key")
+    service2 = InMemoryProviderService(store=store)
+    second = next(
+        item
+        for item in service2.list_providers("user_001").items
+        if item.is_builtin and item.adapter_type == "volcengine_ark"
+    )
+    assert second.api_key_masked.startswith("rot")
+
+
+def test_builtin_provider_definition_refreshes_on_restart(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = JsonFileStore(tmp_path)
+    monkeypatch.setenv("VOLCENGINE_ARK_API_KEY", "seedance-key-123456")
+
+    service = InMemoryProviderService(store=store)
+    builtin = next(
+        item
+        for item in service.list_providers("user_001").items
+        if item.is_builtin and item.adapter_type == "volcengine_ark"
+    )
+    service.update_provider(
+        "user_001",
+        builtin.provider_id,
+        payload=ProviderConfigUpdateRequest(
+            name="Custom Ark Name",
+            base_url="https://custom.example.com/api",
+            api_key="manual-override-secret",
+            models=[{"model": "custom-model", "capabilities": ["video"]}],
+            routes={"video": {"path": "/custom/tasks", "timeout_seconds": 10.0}},
+        ),
+    )
+
+    service2 = InMemoryProviderService(store=store)
+    refreshed = next(
+        item
+        for item in service2.list_providers("user_001").items
+        if item.is_builtin and item.adapter_type == "volcengine_ark"
+    )
+    assert refreshed.name == "Volcengine Ark"
+    assert str(refreshed.base_url).rstrip("/") == "https://ark.cn-beijing.volces.com/api/v3"
+    assert refreshed.models[0].model == "doubao-seedance-1-5-pro-251215"
+    assert refreshed.routes.video.path == "/contents/generations/tasks"
+    assert refreshed.api_key_masked.startswith("see")

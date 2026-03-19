@@ -195,25 +195,52 @@ class InMemoryProviderService:
         changed = False
         for item in _BUILTIN_PROVIDER_DEFS:
             provider_id = _builtin_provider_id(owner_id, item["key"])
-            if provider_id in self._providers:
+            existing = self._providers.get(provider_id)
+            if existing is None:
+                timestamp = datetime.now(UTC)
+                self._providers[provider_id] = ProviderRecord(
+                    provider_id=provider_id,
+                    owner_id=owner_id,
+                    name=item["name"],
+                    base_url=item["base_url"],
+                    api_key=_builtin_api_key(item),
+                    adapter_type=item["adapter_type"],
+                    models=item["models"],
+                    routes=item["routes"],
+                    is_builtin=True,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+                changed = True
                 continue
-            timestamp = datetime.now(UTC)
-            self._providers[provider_id] = ProviderRecord(
-                provider_id=provider_id,
-                owner_id=owner_id,
-                name=item["name"],
-                base_url=item["base_url"],
-                api_key=_builtin_api_key(item),
-                adapter_type=item["adapter_type"],
-                models=item["models"],
-                routes=item["routes"],
-                is_builtin=True,
-                created_at=timestamp,
-                updated_at=timestamp,
-            )
-            changed = True
+
+            refreshed = self._refresh_builtin_provider(existing, owner_id=owner_id, item=item)
+            if refreshed != existing:
+                self._providers[provider_id] = refreshed
+                changed = True
         if changed:
             self._persist()
+
+    def _refresh_builtin_provider(
+        self,
+        existing: ProviderRecord,
+        *,
+        owner_id: str,
+        item: dict,
+    ) -> ProviderRecord:
+        return ProviderRecord(
+            provider_id=existing.provider_id,
+            owner_id=owner_id,
+            name=item["name"],
+            base_url=item["base_url"],
+            api_key=_builtin_api_key(item),
+            adapter_type=item["adapter_type"],
+            models=item["models"],
+            routes=item["routes"],
+            is_builtin=True,
+            created_at=existing.created_at,
+            updated_at=datetime.now(UTC),
+        )
 
     def _persist(self) -> None:
         if self._store is None:
