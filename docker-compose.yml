@@ -27,7 +27,7 @@ services:
     env_file:
       - .env
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -48,7 +48,7 @@ services:
     env_file:
       - .env
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -71,7 +71,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      mysql:
         condition: service_healthy
     networks:
       - gmf_net
@@ -87,7 +87,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      mysql:
         condition: service_healthy
     networks:
       - gmf_net
@@ -103,7 +103,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      mysql:
         condition: service_healthy
     networks:
       - gmf_net
@@ -119,7 +119,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      mysql:
         condition: service_healthy
       remotion_renderer:
         condition: service_healthy
@@ -143,19 +143,24 @@ services:
     networks:
       - gmf_net
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: gmf_postgres
+  mysql:
+    image: mysql:8.4
+    container_name: gmf_mysql
     environment:
-      POSTGRES_DB: geek_movie_forge
-      POSTGRES_USER: geek_movie
-      POSTGRES_PASSWORD: geek_movie
+      MYSQL_DATABASE: geek_movie_forge
+      MYSQL_USER: geek_movie
+      MYSQL_PASSWORD: geek_movie
+      MYSQL_ROOT_PASSWORD: root
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:3306:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U geek_movie -d geek_movie_forge"]
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h localhost -u geek_movie -pgeek_movie"
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -209,7 +214,7 @@ services:
       - gmf_net
 
 volumes:
-  postgres_data:
+  mysql_data:
   redis_data:
   minio_data:
   n8n_data:

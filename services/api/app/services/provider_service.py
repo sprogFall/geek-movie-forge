@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import logging
 import os
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy import desc, select
+from sqlalchemy.orm import Session, sessionmaker
+
+from packages.db.models import ProviderRow
 from packages.shared.contracts.providers import (
     ProviderConfigCreateRequest,
     ProviderConfigUpdateRequest,
@@ -12,16 +15,14 @@ from packages.shared.contracts.providers import (
     ProviderModelConfig,
     ProviderRecord,
     ProviderResponse,
+    ProviderRoutes,
 )
 from packages.shared.enums.model_capability import ModelCapability
-from services.api.app.core.store import JsonFileStore
 from services.api.app.services.errors import (
     ConflictServiceError,
     NotFoundServiceError,
     ValidationServiceError,
 )
-
-_NAMESPACE = "providers"
 
 _BUILTIN_PROVIDER_DEFS = (
     {
@@ -67,22 +68,52 @@ _BUILTIN_PROVIDER_DEFS = (
 )
 
 
+def _parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+def _serialize_models(models: list[ProviderModelConfig]) -> list[dict]:
+    return [item.model_dump(mode="json") for item in models]
+
+
+def _serialize_routes(routes: ProviderRoutes) -> dict:
+    return routes.model_dump(mode="json")
+
+
 class InMemoryProviderService:
-    def __init__(self, *, store: JsonFileStore | None = None) -> None:
-        self._providers: dict[str, ProviderRecord] = {}
-        self._store = store
-        self._load()
+    def __init__(self, *, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
 
     def create_provider(
         self,
         owner_id: str,
         payload: ProviderConfigCreateRequest,
     ) -> ProviderResponse:
-        self._ensure_builtin_providers(owner_id)
-        self._ensure_unique_name(owner_id, payload.name)
-        timestamp = datetime.now(UTC)
-        provider = ProviderRecord(
-            provider_id=f"provider_{uuid4().hex[:12]}",
+        timestamp = datetime.now(UTC).isoformat()
+        provider_id = f"provider_{uuid4().hex[:12]}"
+
+        with self._session_factory() as session:
+            self._ensure_builtin_providers(session, owner_id)
+            self._ensure_unique_name(session, owner_id, payload.name)
+            session.add(
+                ProviderRow(
+                    provider_id=provider_id,
+                    owner_id=owner_id,
+                    name=payload.name,
+                    base_url=str(payload.base_url),
+                    api_key=payload.api_key,
+                    adapter_type=payload.adapter_type,
+                    models_json=_serialize_models(payload.models),
+                    routes_json=_serialize_routes(payload.routes),
+                    is_builtin=False,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+            )
+            session.commit()
+
+        return ProviderRecord(
+            provider_id=provider_id,
             owner_id=owner_id,
             name=payload.name,
             base_url=payload.base_url,
@@ -90,12 +121,9 @@ class InMemoryProviderService:
             adapter_type=payload.adapter_type,
             models=payload.models,
             routes=payload.routes,
-            created_at=timestamp,
-            updated_at=timestamp,
-        )
-        self._providers[provider.provider_id] = provider
-        self._persist()
-        return provider.to_response()
+            created_at=_parse_timestamp(timestamp),
+            updated_at=_parse_timestamp(timestamp),
+        ).to_response()
 
     def update_provider(
         self,
@@ -103,62 +131,62 @@ class InMemoryProviderService:
         provider_id: str,
         payload: ProviderConfigUpdateRequest,
     ) -> ProviderResponse:
-        self._ensure_builtin_providers(owner_id)
-        provider = self.require_provider_record(owner_id, provider_id)
-        if payload.name is not None and payload.name != provider.name:
-            self._ensure_unique_name(
-                owner_id,
-                payload.name,
-                exclude_provider_id=provider_id,
-            )
+        with self._session_factory() as session:
+            self._ensure_builtin_providers(session, owner_id)
+            provider = self._require_provider_row(session, owner_id, provider_id)
+            if payload.name is not None and payload.name != provider.name:
+                self._ensure_unique_name(
+                    session,
+                    owner_id,
+                    payload.name,
+                    exclude_provider_id=provider_id,
+                )
 
-        updated = ProviderRecord(
-            provider_id=provider.provider_id,
-            owner_id=provider.owner_id,
-            name=payload.name or provider.name,
-            base_url=payload.base_url or provider.base_url,
-            api_key=payload.api_key or provider.api_key,
-            adapter_type=provider.adapter_type,
-            models=payload.models or provider.models,
-            routes=payload.routes or provider.routes,
-            is_builtin=provider.is_builtin,
-            created_at=provider.created_at,
-            updated_at=datetime.now(UTC),
-        )
-        self._providers[provider_id] = updated
-        self._persist()
-        return updated.to_response()
+            provider.name = payload.name or provider.name
+            provider.base_url = str(payload.base_url) if payload.base_url is not None else provider.base_url
+            provider.api_key = payload.api_key or provider.api_key
+            provider.models_json = (
+                _serialize_models(payload.models) if payload.models is not None else provider.models_json
+            )
+            provider.routes_json = (
+                _serialize_routes(payload.routes) if payload.routes is not None else provider.routes_json
+            )
+            provider.updated_at = datetime.now(UTC).isoformat()
+            session.commit()
+            session.refresh(provider)
+            return _to_record(provider).to_response()
 
     def list_providers(self, owner_id: str) -> ProviderListResponse:
-        self._ensure_builtin_providers(owner_id)
-        items = [
-            provider.to_response()
-            for provider in self._providers.values()
-            if provider.owner_id == owner_id
-        ]
-        items.sort(key=lambda item: (not item.is_builtin, item.created_at, item.name))
-        return ProviderListResponse(items=items)
+        with self._session_factory() as session:
+            self._ensure_builtin_providers(session, owner_id)
+            rows = session.scalars(
+                select(ProviderRow)
+                .where(ProviderRow.owner_id == owner_id)
+                .order_by(desc(ProviderRow.is_builtin), ProviderRow.created_at, ProviderRow.name)
+            ).all()
+        return ProviderListResponse(items=[_to_record(row).to_response() for row in rows])
 
     def get_provider(self, owner_id: str, provider_id: str) -> ProviderResponse | None:
-        self._ensure_builtin_providers(owner_id)
-        provider = self._providers.get(provider_id)
-        if provider is None or provider.owner_id != owner_id:
-            return None
-        return provider.to_response()
+        with self._session_factory() as session:
+            self._ensure_builtin_providers(session, owner_id)
+            row = session.get(ProviderRow, provider_id)
+            if row is None or row.owner_id != owner_id:
+                return None
+            return _to_record(row).to_response()
 
     def require_provider_record(self, owner_id: str, provider_id: str) -> ProviderRecord:
-        self._ensure_builtin_providers(owner_id)
-        provider = self._providers.get(provider_id)
-        if provider is None or provider.owner_id != owner_id:
-            raise NotFoundServiceError("Provider not found")
-        return provider
+        with self._session_factory() as session:
+            self._ensure_builtin_providers(session, owner_id)
+            return _to_record(self._require_provider_row(session, owner_id, provider_id))
 
     def delete_provider(self, owner_id: str, provider_id: str) -> None:
-        provider = self.require_provider_record(owner_id, provider_id)
-        if provider.is_builtin:
-            raise ConflictServiceError("Built-in provider cannot be deleted")
-        del self._providers[provider_id]
-        self._persist()
+        with self._session_factory() as session:
+            self._ensure_builtin_providers(session, owner_id)
+            provider = self._require_provider_row(session, owner_id, provider_id)
+            if provider.is_builtin:
+                raise ConflictServiceError("Built-in provider cannot be deleted")
+            session.delete(provider)
+            session.commit()
 
     def ensure_model_capability(
         self,
@@ -177,88 +205,94 @@ class InMemoryProviderService:
 
     def _ensure_unique_name(
         self,
+        session: Session,
         owner_id: str,
         name: str,
         exclude_provider_id: str | None = None,
     ) -> None:
-        self._ensure_builtin_providers(owner_id)
-        for provider in self._providers.values():
-            if provider.owner_id != owner_id:
-                continue
-            if provider.name != name:
-                continue
-            if exclude_provider_id is not None and provider.provider_id == exclude_provider_id:
-                continue
-            raise ConflictServiceError("Provider name already exists")
+        row = session.scalar(
+            select(ProviderRow).where(
+                ProviderRow.owner_id == owner_id,
+                ProviderRow.name == name,
+            )
+        )
+        if row is None:
+            return
+        if exclude_provider_id is not None and row.provider_id == exclude_provider_id:
+            return
+        raise ConflictServiceError("Provider name already exists")
 
-    def _ensure_builtin_providers(self, owner_id: str) -> None:
+    def _ensure_builtin_providers(self, session: Session, owner_id: str) -> None:
         changed = False
         for item in _BUILTIN_PROVIDER_DEFS:
             provider_id = _builtin_provider_id(owner_id, item["key"])
-            existing = self._providers.get(provider_id)
-            if existing is None:
-                timestamp = datetime.now(UTC)
-                self._providers[provider_id] = ProviderRecord(
-                    provider_id=provider_id,
-                    owner_id=owner_id,
-                    name=item["name"],
-                    base_url=item["base_url"],
-                    api_key=_builtin_api_key(item),
-                    adapter_type=item["adapter_type"],
-                    models=item["models"],
-                    routes=item["routes"],
-                    is_builtin=True,
-                    created_at=timestamp,
-                    updated_at=timestamp,
+            row = session.get(ProviderRow, provider_id)
+            desired_api_key = _builtin_api_key(item)
+            desired_models = _serialize_models(item["models"])
+            desired_routes = item["routes"]
+            if row is None:
+                timestamp = datetime.now(UTC).isoformat()
+                session.add(
+                    ProviderRow(
+                        provider_id=provider_id,
+                        owner_id=owner_id,
+                        name=item["name"],
+                        base_url=item["base_url"],
+                        api_key=desired_api_key,
+                        adapter_type=item["adapter_type"],
+                        models_json=desired_models,
+                        routes_json=desired_routes,
+                        is_builtin=True,
+                        created_at=timestamp,
+                        updated_at=timestamp,
+                    )
                 )
                 changed = True
                 continue
 
-            refreshed = self._refresh_builtin_provider(existing, owner_id=owner_id, item=item)
-            if refreshed != existing:
-                self._providers[provider_id] = refreshed
+            if (
+                row.name != item["name"]
+                or row.base_url != item["base_url"]
+                or row.api_key != desired_api_key
+                or row.adapter_type != item["adapter_type"]
+                or row.models_json != desired_models
+                or row.routes_json != desired_routes
+                or not row.is_builtin
+            ):
+                row.name = item["name"]
+                row.base_url = item["base_url"]
+                row.api_key = desired_api_key
+                row.adapter_type = item["adapter_type"]
+                row.models_json = desired_models
+                row.routes_json = desired_routes
+                row.is_builtin = True
+                row.updated_at = datetime.now(UTC).isoformat()
                 changed = True
         if changed:
-            self._persist()
+            session.commit()
 
-    def _refresh_builtin_provider(
-        self,
-        existing: ProviderRecord,
-        *,
-        owner_id: str,
-        item: dict,
-    ) -> ProviderRecord:
-        return ProviderRecord(
-            provider_id=existing.provider_id,
-            owner_id=owner_id,
-            name=item["name"],
-            base_url=item["base_url"],
-            api_key=_builtin_api_key(item),
-            adapter_type=item["adapter_type"],
-            models=item["models"],
-            routes=item["routes"],
-            is_builtin=True,
-            created_at=existing.created_at,
-            updated_at=datetime.now(UTC),
-        )
+    @staticmethod
+    def _require_provider_row(session: Session, owner_id: str, provider_id: str) -> ProviderRow:
+        row = session.get(ProviderRow, provider_id)
+        if row is None or row.owner_id != owner_id:
+            raise NotFoundServiceError("Provider not found")
+        return row
 
-    def _persist(self) -> None:
-        if self._store is None:
-            return
-        data = {key: value.model_dump(mode="json") for key, value in self._providers.items()}
-        self._store.save(_NAMESPACE, data)
 
-    def _load(self) -> None:
-        if self._store is None:
-            return
-        data = self._store.load(_NAMESPACE)
-        if data is None:
-            return
-        for key, value in data.items():
-            try:
-                self._providers[key] = ProviderRecord(**value)
-            except Exception:
-                logging.getLogger(__name__).warning("Skipping corrupt provider entry %s", key)
+def _to_record(row: ProviderRow) -> ProviderRecord:
+    return ProviderRecord(
+        provider_id=row.provider_id,
+        owner_id=row.owner_id,
+        name=row.name,
+        base_url=row.base_url,
+        api_key=row.api_key,
+        adapter_type=row.adapter_type,
+        models=[ProviderModelConfig.model_validate(item) for item in row.models_json],
+        routes=ProviderRoutes.model_validate(row.routes_json or {}),
+        is_builtin=row.is_builtin,
+        created_at=_parse_timestamp(row.created_at),
+        updated_at=_parse_timestamp(row.updated_at),
+    )
 
 
 def _builtin_provider_id(owner_id: str, key: str) -> str:

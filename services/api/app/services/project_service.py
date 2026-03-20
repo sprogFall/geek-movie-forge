@@ -1,74 +1,84 @@
 from __future__ import annotations
 
-import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
+
+from packages.db.models import ProjectRow
 from packages.shared.contracts.projects import (
     ProjectCreateRequest,
     ProjectListResponse,
-    ProjectRecord,
     ProjectResponse,
 )
-from services.api.app.core.store import JsonFileStore
+from packages.shared.enums.project_status import ProjectStatus
 
-_NAMESPACE = "projects"
+
+def _parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value)
 
 
 class InMemoryProjectService:
-    def __init__(self, *, store: JsonFileStore | None = None) -> None:
-        self._projects: dict[str, ProjectRecord] = {}
-        self._store = store
-        self._load()
+    def __init__(self, *, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
 
     def create_project(self, owner_id: str, payload: ProjectCreateRequest) -> ProjectResponse:
-        timestamp = datetime.now(UTC)
-        record = ProjectRecord(
-            project_id=f"proj_{uuid4().hex[:12]}",
-            owner_id=owner_id,
+        timestamp = datetime.now(UTC).isoformat()
+        project_id = f"proj_{uuid4().hex[:12]}"
+
+        with self._session_factory() as session:
+            session.add(
+                ProjectRow(
+                    project_id=project_id,
+                    owner_id=owner_id,
+                    title=payload.title,
+                    summary=payload.summary,
+                    platform=payload.platform,
+                    aspect_ratio=payload.aspect_ratio,
+                    status=payload.status.value,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+            )
+            session.commit()
+
+        return ProjectResponse(
+            project_id=project_id,
             title=payload.title,
             summary=payload.summary,
             platform=payload.platform,
             aspect_ratio=payload.aspect_ratio,
             status=payload.status,
-            created_at=timestamp,
-            updated_at=timestamp,
+            created_at=_parse_timestamp(timestamp),
+            updated_at=_parse_timestamp(timestamp),
         )
-        self._projects[record.project_id] = record
-        self._persist()
-        return record.to_response()
 
     def list_projects(self, owner_id: str) -> ProjectListResponse:
-        items = [
-            record.to_response()
-            for record in self._projects.values()
-            if record.owner_id == owner_id
-        ]
-        items.sort(key=lambda item: item.created_at)
-        return ProjectListResponse(items=items)
+        with self._session_factory() as session:
+            rows = session.scalars(
+                select(ProjectRow)
+                .where(ProjectRow.owner_id == owner_id)
+                .order_by(ProjectRow.created_at)
+            ).all()
+        return ProjectListResponse(items=[_to_response(row) for row in rows])
 
     def get_project(self, owner_id: str, project_id: str) -> ProjectResponse | None:
-        record = self._projects.get(project_id)
-        if record is None or record.owner_id != owner_id:
-            return None
-        return record.to_response()
+        with self._session_factory() as session:
+            row = session.get(ProjectRow, project_id)
+            if row is None or row.owner_id != owner_id:
+                return None
+            return _to_response(row)
 
-    def _persist(self) -> None:
-        if self._store is None:
-            return
-        data = {k: v.model_dump(mode="json") for k, v in self._projects.items()}
-        self._store.save(_NAMESPACE, data)
 
-    def _load(self) -> None:
-        if self._store is None:
-            return
-        data = self._store.load(_NAMESPACE)
-        if data is None:
-            return
-        for key, value in data.items():
-            try:
-                self._projects[key] = ProjectRecord(**value)
-            except Exception:
-                logging.getLogger(__name__).warning(
-                    "Skipping corrupt project entry %s", key
-                )
+def _to_response(row: ProjectRow) -> ProjectResponse:
+    return ProjectResponse(
+        project_id=row.project_id,
+        title=row.title,
+        summary=row.summary,
+        platform=row.platform,
+        aspect_ratio=row.aspect_ratio,
+        status=ProjectStatus(row.status),
+        created_at=_parse_timestamp(row.created_at),
+        updated_at=_parse_timestamp(row.updated_at),
+    )

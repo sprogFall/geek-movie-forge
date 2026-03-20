@@ -1,7 +1,9 @@
 import os
 
-# Disable file persistence during tests to prevent cross-test contamination
-os.environ["PERSIST_ENABLED"] = "false"
+# Use isolated in-memory SQLite for tests
+os.environ["APP_ENV"] = "test"
+os.environ["DB_BACKEND"] = "sqlite"
+os.environ["SQLITE_PATH"] = ":memory:"
 
 # Clear cached settings so they pick up the test env vars
 from services.api.app.core.config import get_settings  # noqa: E402

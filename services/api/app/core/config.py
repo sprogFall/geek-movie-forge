@@ -1,6 +1,6 @@
 from functools import lru_cache
 from os import getenv
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -17,8 +17,13 @@ class Settings(BaseModel):
     app_env: str
     jwt_secret: str
     jwt_expire_minutes: int
-    persist_enabled: bool
-    persist_dir: str
+    db_backend: Literal["sqlite", "mysql"]
+    sqlite_path: str
+    mysql_host: str | None = None
+    mysql_port: int = 3306
+    mysql_user: str | None = None
+    mysql_password: str | None = None
+    mysql_database: str | None = None
     cors_allow_origins: list[str]
     cors_allow_credentials: bool
     api_max_request_bytes: int
@@ -37,11 +42,34 @@ class Settings(BaseModel):
             raise ValueError(
                 "JWT_SECRET must be set to a non-default value when APP_ENV is not local/test"
             )
+        if self.db_backend == "sqlite":
+            if not self.sqlite_path.strip():
+                raise ValueError("SQLITE_PATH must not be blank when DB_BACKEND=sqlite")
+        if self.db_backend == "mysql":
+            required_fields = {
+                "MYSQL_HOST": self.mysql_host,
+                "MYSQL_USER": self.mysql_user,
+                "MYSQL_PASSWORD": self.mysql_password,
+                "MYSQL_DATABASE": self.mysql_database,
+            }
+            missing = [name for name, value in required_fields.items() if not value]
+            if missing:
+                raise ValueError(f"{missing[0]} is required when DB_BACKEND=mysql")
         if self.cors_allow_credentials and "*" in self.cors_allow_origins:
             raise ValueError("CORS_ALLOW_ORIGINS cannot include '*' when credentials are enabled")
         if self.api_max_request_bytes < 0:
             raise ValueError("API_MAX_REQUEST_BYTES must be >= 0")
         return self
+
+    @property
+    def database_url(self) -> str:
+        if self.db_backend == "sqlite":
+            return f"sqlite+pysqlite:///{self.sqlite_path}"
+        return (
+            "mysql+pymysql://"
+            f"{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/"
+            f"{self.mysql_database}"
+        )
 
 
 @lru_cache(maxsize=1)
@@ -57,9 +85,13 @@ def get_settings() -> Settings:
         app_env=app_env,
         jwt_secret=getenv("JWT_SECRET", _DEFAULT_JWT_SECRET),
         jwt_expire_minutes=int(getenv("JWT_EXPIRE_MINUTES", "1440")),
-        persist_enabled=getenv("PERSIST_ENABLED", "true" if app_env == "local" else "false").lower()
-        in ("true", "1", "yes"),
-        persist_dir=getenv("PERSIST_DIR", ".data"),
+        db_backend=getenv("DB_BACKEND", "sqlite").strip().lower(),
+        sqlite_path=getenv("SQLITE_PATH", ".data/geek_movie_forge.db"),
+        mysql_host=getenv("MYSQL_HOST"),
+        mysql_port=int(getenv("MYSQL_PORT", "3306")),
+        mysql_user=getenv("MYSQL_USER"),
+        mysql_password=getenv("MYSQL_PASSWORD"),
+        mysql_database=getenv("MYSQL_DATABASE"),
         cors_allow_origins=cors_allow_origins,
         cors_allow_credentials=getenv("CORS_ALLOW_CREDENTIALS", "false").lower()
         in ("true", "1", "yes"),

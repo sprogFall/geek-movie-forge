@@ -1,7 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
+from packages.db.session import create_database_engine, create_session_factory, initialize_database
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,7 +16,6 @@ from services.api.app.api.routes.projects import router as projects_router
 from services.api.app.api.routes.providers import router as providers_router
 from services.api.app.api.routes.tasks import router as tasks_router
 from services.api.app.core.config import get_settings
-from services.api.app.core.store import JsonFileStore
 from services.api.app.middleware.api_logging import ApiLoggingMiddleware
 from services.api.app.services.asset_service import InMemoryAssetService
 from services.api.app.services.auth_service import InMemoryAuthService
@@ -33,21 +32,25 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    store: JsonFileStore | None = None
-    if settings.persist_enabled:
-        store = JsonFileStore(Path(settings.persist_dir))
+    engine = create_database_engine(
+        db_backend=settings.db_backend,
+        database_url=settings.database_url,
+    )
+    initialize_database(engine)
+    session_factory = create_session_factory(engine)
+    app.state.db_engine = engine
 
     app.state.auth_service = InMemoryAuthService(
         jwt_secret=settings.jwt_secret,
         jwt_expire_minutes=settings.jwt_expire_minutes,
-        store=store,
+        session_factory=session_factory,
     )
-    app.state.project_service = InMemoryProjectService(store=store)
-    app.state.task_service = InMemoryTaskService(store=store)
-    app.state.provider_service = InMemoryProviderService(store=store)
-    app.state.asset_service = InMemoryAssetService(store=store)
+    app.state.project_service = InMemoryProjectService(session_factory=session_factory)
+    app.state.task_service = InMemoryTaskService(session_factory=session_factory)
+    app.state.provider_service = InMemoryProviderService(session_factory=session_factory)
+    app.state.asset_service = InMemoryAssetService(session_factory=session_factory)
     app.state.provider_gateway = HttpProviderGateway()
-    app.state.call_log_service = InMemoryCallLogService(store=store)
+    app.state.call_log_service = InMemoryCallLogService(session_factory=session_factory)
     app.state.generation_service = GenerationService(
         provider_service=app.state.provider_service,
         asset_service=app.state.asset_service,
@@ -55,6 +58,7 @@ async def lifespan(app: FastAPI):
         call_log_service=app.state.call_log_service,
     )
     yield
+    engine.dispose()
 
 
 settings = get_settings()

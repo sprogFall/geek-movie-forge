@@ -1,44 +1,59 @@
 from __future__ import annotations
 
-import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
+
+from packages.db.models import TaskRow
 from packages.shared.contracts.tasks import TaskCreateRequest, TaskListResponse, TaskResponse
 from packages.shared.enums.task_status import TaskStatus
-from services.api.app.core.store import JsonFileStore
 
-_NAMESPACE = "tasks"
+
+def _parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value)
 
 
 class InMemoryTaskService:
-    def __init__(self, *, store: JsonFileStore | None = None) -> None:
-        self._tasks: dict[str, TaskResponse] = {}
-        self._task_owners: dict[str, str] = {}
-        self._store = store
-        self._load()
+    def __init__(self, *, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
 
     def create_task(self, owner_id: str, payload: TaskCreateRequest) -> TaskResponse:
-        created_at = datetime.now(UTC)
-        task = TaskResponse(
-            task_id=f"task_{uuid4().hex[:12]}",
+        created_at = datetime.now(UTC).isoformat()
+        task_id = f"task_{uuid4().hex[:12]}"
+
+        with self._session_factory() as session:
+            session.add(
+                TaskRow(
+                    task_id=task_id,
+                    owner_id=owner_id,
+                    project_id=payload.project_id,
+                    title=payload.title,
+                    source_text=payload.source_text,
+                    platform=payload.platform,
+                    status=TaskStatus.DRAFT.value,
+                    created_at=created_at,
+                )
+            )
+            session.commit()
+
+        return TaskResponse(
+            task_id=task_id,
             project_id=payload.project_id,
             title=payload.title,
             source_text=payload.source_text,
             platform=payload.platform,
             status=TaskStatus.DRAFT,
-            created_at=created_at,
+            created_at=_parse_timestamp(created_at),
         )
-        self._tasks[task.task_id] = task
-        self._task_owners[task.task_id] = owner_id
-        self._persist()
-        return task
 
     def get_task(self, owner_id: str, task_id: str) -> TaskResponse | None:
-        task = self._tasks.get(task_id)
-        if task is None or self._task_owners.get(task_id) != owner_id:
-            return None
-        return task
+        with self._session_factory() as session:
+            row = session.get(TaskRow, task_id)
+            if row is None or row.owner_id != owner_id:
+                return None
+            return _to_response(row)
 
     def list_tasks(
         self,
@@ -47,38 +62,25 @@ class InMemoryTaskService:
         project_id: str | None = None,
         status: TaskStatus | None = None,
     ) -> TaskListResponse:
-        items = [
-            task
-            for task_id, task in self._tasks.items()
-            if self._task_owners.get(task_id) == owner_id
-        ]
+        stmt = select(TaskRow).where(TaskRow.owner_id == owner_id)
         if project_id is not None:
-            items = [task for task in items if task.project_id == project_id]
+            stmt = stmt.where(TaskRow.project_id == project_id)
         if status is not None:
-            items = [task for task in items if task.status == status]
-        items.sort(key=lambda item: item.created_at)
-        return TaskListResponse(items=items)
+            stmt = stmt.where(TaskRow.status == status.value)
+        stmt = stmt.order_by(TaskRow.created_at)
 
-    def _persist(self) -> None:
-        if self._store is None:
-            return
-        data = {
-            "tasks": {k: v.model_dump(mode="json") for k, v in self._tasks.items()},
-            "owners": self._task_owners,
-        }
-        self._store.save(_NAMESPACE, data)
+        with self._session_factory() as session:
+            rows = session.scalars(stmt).all()
+        return TaskListResponse(items=[_to_response(row) for row in rows])
 
-    def _load(self) -> None:
-        if self._store is None:
-            return
-        data = self._store.load(_NAMESPACE)
-        if data is None:
-            return
-        for key, value in data.get("tasks", {}).items():
-            try:
-                self._tasks[key] = TaskResponse(**value)
-            except Exception:
-                logging.getLogger(__name__).warning(
-                    "Skipping corrupt task entry %s", key
-                )
-        self._task_owners = data.get("owners", {})
+
+def _to_response(row: TaskRow) -> TaskResponse:
+    return TaskResponse(
+        task_id=row.task_id,
+        project_id=row.project_id,
+        title=row.title,
+        source_text=row.source_text,
+        platform=row.platform,
+        status=TaskStatus(row.status),
+        created_at=_parse_timestamp(row.created_at),
+    )
