@@ -6,6 +6,9 @@ from services.api.app.services.generation_service import GenerationService
 from services.api.app.services.project_service import InMemoryProjectService
 from services.api.app.services.provider_service import InMemoryProviderService
 from services.api.app.services.task_service import InMemoryTaskService
+from services.api.app.services.video_generation_task_service import (
+    InMemoryVideoGenerationTaskService,
+)
 
 
 def get_task_service(request: Request) -> InMemoryTaskService:
@@ -30,3 +33,7 @@ def get_generation_service(request: Request) -> GenerationService:
 
 def get_call_log_service(request: Request) -> InMemoryCallLogService:
     return request.app.state.call_log_service
+
+
+def get_video_generation_task_service(request: Request) -> InMemoryVideoGenerationTaskService:
+    return request.app.state.video_generation_task_service

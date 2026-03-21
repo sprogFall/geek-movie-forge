@@ -1,3 +1,5 @@
+import time
+
 from fastapi.testclient import TestClient
 
 from packages.provider_sdk.gateway import ProviderGateway
@@ -7,6 +9,9 @@ from packages.shared.contracts.generations import (
 )
 from services.api.app.main import app
 from services.api.app.services.generation_service import GenerationService
+from services.api.app.services.video_generation_task_service import (
+    InMemoryVideoGenerationTaskService,
+)
 from services.api.tests.helpers import register_and_get_headers
 
 
@@ -91,6 +96,24 @@ class RecordingVideoGateway(FakeProviderGateway):
         return await super().generate_video(provider, payload)
 
 
+class NoLastFrameVideoGateway(FakeProviderGateway):
+    async def generate_video(self, provider, payload):
+        self.last_video_payload = {"provider": provider, "payload": payload}
+        duration_seconds = payload.options.get("duration_seconds") or payload.options.get("duration")
+        return ProviderMediaGenerationResult(
+            provider_request_id="vid_req_no_last_frame",
+            outputs=[
+                {
+                    "index": 0,
+                    "url": "https://cdn.example.com/generated/video-no-last-frame.mp4",
+                    "mime_type": "video/mp4",
+                    "duration_seconds": duration_seconds or 8,
+                }
+            ],
+            usage={"input_tokens": 120, "output_tokens": 45, "total_tokens": 165},
+        )
+
+
 def _create_provider(
     client: TestClient,
     headers: dict[str, str],
@@ -114,6 +137,33 @@ def _create_provider(
     )
     assert response.status_code == 201
     return response.json()["provider_id"]
+
+
+def _install_generation_services(client: TestClient, gateway: ProviderGateway) -> None:
+    app.state.generation_service = GenerationService(
+        provider_service=app.state.provider_service,
+        asset_service=app.state.asset_service,
+        provider_gateway=gateway,
+    )
+    app.state.video_generation_task_service = InMemoryVideoGenerationTaskService(
+        session_factory=app.state.session_factory,
+        generation_service=app.state.generation_service,
+    )
+
+
+def _wait_for_video_task_completion(
+    client: TestClient,
+    headers: dict[str, str],
+    task_id: str,
+) -> dict:
+    for _ in range(40):
+        response = client.get(f"/api/v1/generations/video-tasks/{task_id}", headers=headers)
+        assert response.status_code == 200
+        body = response.json()
+        if body["status"] in {"completed", "failed"}:
+            return body
+        time.sleep(0.05)
+    raise AssertionError("video generation task did not finish in time")
 
 
 def test_generate_image_and_save_assets() -> None:
@@ -338,6 +388,80 @@ def test_generate_video_allows_text_material_only_request() -> None:
     ]
 
 
+def test_create_async_single_video_task_and_query_result() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        _install_generation_services(client, fake_gateway)
+        provider_id = _create_provider(client, headers)
+
+        create_response = client.post(
+            "/api/v1/generations/videos/async",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "count": 1,
+                "prompt": "赛博城市追逐镜头",
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == 202
+        task_id = create_response.json()["task_id"]
+
+        detail_body = _wait_for_video_task_completion(client, headers, task_id)
+        list_response = client.get("/api/v1/generations/video-tasks", headers=headers)
+
+    assert detail_body["status"] == "completed"
+    assert detail_body["task_kind"] == "single"
+    assert detail_body["result"]["outputs"][0]["url"] == "https://cdn.example.com/generated/video-1.mp4"
+    assert detail_body["batch_result"] is None
+    assert list_response.status_code == 200
+    assert any(item["task_id"] == task_id for item in list_response.json()["items"])
+
+
+def test_video_generation_task_history_persists_after_service_recreation() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        _install_generation_services(client, fake_gateway)
+        provider_id = _create_provider(client, headers)
+
+        create_response = client.post(
+            "/api/v1/generations/videos/async",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "count": 1,
+                "prompt": "废土追逐镜头",
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == 202
+        task_id = create_response.json()["task_id"]
+
+        completed_body = _wait_for_video_task_completion(client, headers, task_id)
+        assert completed_body["status"] == "completed"
+
+        app.state.video_generation_task_service = InMemoryVideoGenerationTaskService(
+            session_factory=app.state.session_factory,
+            generation_service=app.state.generation_service,
+        )
+
+        detail_response = client.get(f"/api/v1/generations/video-tasks/{task_id}", headers=headers)
+        list_response = client.get("/api/v1/generations/video-tasks", headers=headers)
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["task_id"] == task_id
+    assert detail_response.json()["status"] == "completed"
+    assert detail_response.json()["result"]["outputs"][0]["url"] == (
+        "https://cdn.example.com/generated/video-1.mp4"
+    )
+    assert any(item["task_id"] == task_id for item in list_response.json()["items"])
+
+
 def test_generate_text_and_query_saved_materials() -> None:
     fake_gateway = FakeProviderGateway()
 
@@ -510,6 +634,53 @@ def test_generate_multi_video_returns_per_segment_results() -> None:
     assert body["segments"][0]["generation"]["outputs"][0]["duration_seconds"] == 10
     assert body["segments"][1]["status"] == "error"
     assert "second segment failed" in body["segments"][1]["error_detail"]
+
+
+def test_create_async_multi_video_task_and_query_result() -> None:
+    partial_gateway = PartialFailVideoGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        _install_generation_services(client, partial_gateway)
+        provider_id = _create_provider(client, headers)
+
+        create_response = client.post(
+            "/api/v1/generations/videos/batch/async",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "prompt": "赛博城市追逐短片",
+                "segments": [
+                    {
+                        "segment_index": 1,
+                        "title": "开场钩子",
+                        "duration_seconds": 10,
+                        "visual_prompt": "夜色城市俯拍，霓虹闪烁",
+                        "narration_text": "雨夜里，主角独自穿过空旷街头。",
+                    },
+                    {
+                        "segment_index": 2,
+                        "title": "冲突升级",
+                        "duration_seconds": 10,
+                        "visual_prompt": "镜头快速推进，敌人逼近",
+                        "narration_text": "警报骤然响起，身后的追兵越来越近。",
+                    },
+                ],
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == 202
+        task_id = create_response.json()["task_id"]
+
+        detail_body = _wait_for_video_task_completion(client, headers, task_id)
+
+    assert detail_body["status"] == "completed"
+    assert detail_body["task_kind"] == "multi"
+    assert detail_body["result"] is None
+    assert detail_body["batch_result"]["segment_count"] == 2
+    assert detail_body["batch_result"]["segments"][0]["status"] == "success"
+    assert detail_body["batch_result"]["segments"][1]["status"] == "error"
 
 
 def test_generate_multi_video_allows_segment_only_request() -> None:
@@ -731,9 +902,58 @@ def test_generate_multi_video_supports_mixed_frame_stitching_and_preserves_mater
     assert payload_2.options["input_mode"] == "first_last_frame"
     assert "input_mode" not in payload_1.options
     assert "input_mode" not in payload_3.options
+    assert payload_1.options["return_last_frame"] is True
+    assert payload_2.options["return_last_frame"] is True
+    assert payload_3.options["return_last_frame"] is True
     assert payload_1.options["generate_audio"] is True
     assert payload_2.options["generate_audio"] is True
     assert payload_3.options["generate_audio"] is True
+
+
+def test_generate_multi_video_reports_missing_previous_last_frame_clearly() -> None:
+    gateway = NoLastFrameVideoGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=gateway,
+        )
+        provider_id = _create_provider(client, headers, adapter_type="volcengine_ark")
+
+        response = client.post(
+            "/api/v1/generations/videos/batch",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "prompt": "连续叙事短片",
+                "segments": [
+                    {
+                        "segment_index": 1,
+                        "title": "第一段",
+                        "duration_seconds": 8,
+                        "visual_prompt": "雨夜街头开场",
+                        "narration_text": "主角在街口停步。",
+                    },
+                    {
+                        "segment_index": 2,
+                        "title": "第二段",
+                        "duration_seconds": 9,
+                        "visual_prompt": "镜头接上并快速推近",
+                        "narration_text": "镜头从上段尾帧自然衔接推进。",
+                        "use_previous_segment_last_frame": True,
+                    },
+                ],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["segments"][0]["status"] == "success"
+    assert body["segments"][1]["status"] == "error"
+    assert "previous segment's last-frame image" in body["segments"][1]["error_detail"]
 
 
 def test_generate_video_enables_audio_by_default_for_volcengine_ark() -> None:

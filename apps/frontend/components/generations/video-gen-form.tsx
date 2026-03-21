@@ -1,23 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createAsset,
-  generateMultiVideos,
+  createMultiVideoGenerationTask,
+  createVideoGenerationTask,
   regenerateMultiVideoSegment,
-  generateVideos,
   listAssets,
   listProviders,
+  listVideoGenerationTasks,
   planMultiVideos,
 } from "@/lib/api";
 import { formatElapsed, useElapsedMs } from "@/lib/elapsed";
 import type {
   AssetResponse,
-  MediaGenerationResponse,
-  MultiVideoGenerationResponse,
   MultiVideoPlanResponse,
   MultiVideoSegmentGenerationResult,
   ProviderResponse,
+  VideoGenerationTaskResponse,
   VideoSegmentPlan,
 } from "@/types/api";
 
@@ -59,8 +59,6 @@ export function VideoGenForm() {
   const [scenePromptAssetIds, setScenePromptAssetIds] = useState<string[]>([]);
   const [imageAssets, setImageAssets] = useState<AssetResponse[]>([]);
   const [textAssets, setTextAssets] = useState<AssetResponse[]>([]);
-  const [copyNotice, setCopyNotice] = useState("");
-  const copyTimerRef = useRef<number | null>(null);
   const [assetPickerOpen, setAssetPickerOpen] = useState<"image" | "text" | null>(null);
   const [assetPickerLoading, setAssetPickerLoading] = useState(false);
   const [assetPickerError, setAssetPickerError] = useState("");
@@ -72,15 +70,18 @@ export function VideoGenForm() {
   const [batchLoading, setBatchLoading] = useState(false);
   const [segmentRefreshing, setSegmentRefreshing] = useState<Record<number, boolean>>({});
   const [error, setError] = useState("");
-  const [result, setResult] = useState<MediaGenerationResponse | null>(null);
   const [plan, setPlan] = useState<MultiVideoPlanResponse | null>(null);
-  const [batchResult, setBatchResult] = useState<MultiVideoGenerationResponse | null>(null);
+  const [taskRecords, setTaskRecords] = useState<VideoGenerationTaskResponse[]>([]);
+  const [taskRecordsLoading, setTaskRecordsLoading] = useState(true);
+  const [taskRecordsRefreshing, setTaskRecordsRefreshing] = useState(false);
+  const [taskRecordsError, setTaskRecordsError] = useState("");
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   const [saveCategory, setSaveCategory] = useState("生成");
-  const [savingAssets, setSavingAssets] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const [savedAssets, setSavedAssets] = useState<AssetResponse[]>([]);
+  const [taskAssetStates, setTaskAssetStates] = useState<Record<string, SegmentAssetSaveState>>(
+    {}
+  );
   const [segmentAssetStates, setSegmentAssetStates] = useState<
     Record<number, SegmentAssetSaveState>
   >({});
@@ -93,14 +94,7 @@ export function VideoGenForm() {
 
   useEffect(() => {
     void loadProviders();
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current != null) {
-        window.clearTimeout(copyTimerRef.current);
-      }
-    };
+    void loadTaskRecords();
   }, []);
 
   async function loadProviders() {
@@ -148,9 +142,16 @@ export function VideoGenForm() {
   const hasVisualReferences =
     imageMaterialAssetIds.length > 0 || imageMaterialUrlList.length > 0;
   const plannedSegments = plan?.segments ?? [];
-
+  const hasPendingTasks = taskRecords.some(
+    (task) => task.status === "queued" || task.status === "running"
+  );
+  const activeTask = taskRecords.find((task) => task.task_id === activeTaskId) ?? null;
+  const displayResult = activeTask?.task_kind === "single" ? activeTask.result : null;
+  const displayBatchResult = activeTask?.task_kind === "multi" ? activeTask.batch_result : null;
+  const activeTaskAssetState = activeTask ? taskAssetStates[activeTask.task_id] : undefined;
   const activeSegment =
-    batchResult?.segments.find((segment) => segment.segment_index === activeSegmentIndex) ?? null;
+    displayBatchResult?.segments.find((segment) => segment.segment_index === activeSegmentIndex) ??
+    null;
 
   useEffect(() => {
     if (videoProviders.length === 0) return;
@@ -183,6 +184,14 @@ export function VideoGenForm() {
       setPlanModel(nextModel);
     }
   }, [textProviders, planProviderId, planModel]);
+
+  useEffect(() => {
+    if (!hasPendingTasks) return;
+    const timerId = window.setInterval(() => {
+      void loadTaskRecords({ silent: true });
+    }, 4000);
+    return () => window.clearInterval(timerId);
+  }, [hasPendingTasks]);
 
   async function openAssetPicker(kind: "image" | "text") {
     setAssetPickerOpen(kind);
@@ -259,6 +268,39 @@ export function VideoGenForm() {
     }
   }
 
+  async function loadTaskRecords(options?: { silent?: boolean }) {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setTaskRecordsLoading(true);
+    }
+    setTaskRecordsError("");
+    try {
+      const data = await listVideoGenerationTasks();
+      setTaskRecords(data.items);
+      setActiveTaskId((prev) => {
+        if (prev && data.items.some((item) => item.task_id === prev)) {
+          return prev;
+        }
+        return data.items[0]?.task_id ?? null;
+      });
+    } catch (err) {
+      setTaskRecordsError(err instanceof Error ? err.message : "加载生成记录失败");
+    } finally {
+      setTaskRecordsLoading(false);
+      setTaskRecordsRefreshing(false);
+    }
+  }
+
+  function upsertTaskRecord(record: VideoGenerationTaskResponse) {
+    setTaskRecords((prev) => {
+      const next = [record, ...prev.filter((item) => item.task_id !== record.task_id)];
+      return next.sort(
+        (left, right) =>
+          new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+      );
+    });
+  }
+
   function appendTextGuidance(body: Record<string, unknown>) {
     if (promptValue) {
       body.prompt = promptValue;
@@ -298,16 +340,13 @@ export function VideoGenForm() {
     }
     setLoading(true);
     setError("");
-    setResult(null);
-    setSaveError("");
-    setSavedAssets([]);
     try {
       const body = buildCommonVideoPayload();
       body.count = count;
-      const response = await generateVideos(body);
-      setResult(response);
+      const response = await createVideoGenerationTask(body);
+      upsertTaskRecord(response);
+      setActiveTaskId(response.task_id);
       setPlan(null);
-      setBatchResult(null);
       localStorage.setItem(LAST_VIDEO_PROVIDER_KEY, providerId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "生成失败");
@@ -325,7 +364,6 @@ export function VideoGenForm() {
     setPlanning(true);
     setError("");
     setPlan(null);
-    setBatchResult(null);
     try {
       const response = await planMultiVideos(
         appendTextGuidance({
@@ -350,12 +388,12 @@ export function VideoGenForm() {
     setError("");
     setSegmentAssetStates({});
     try {
-      const response = await generateMultiVideos({
+      const response = await createMultiVideoGenerationTask({
         ...buildCommonVideoPayload(),
         segments: plan.segments,
       });
-      setBatchResult(response);
-      setResult(null);
+      upsertTaskRecord(response);
+      setActiveTaskId(response.task_id);
       localStorage.setItem(LAST_VIDEO_PROVIDER_KEY, providerId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "批量视频生成失败");
@@ -365,11 +403,15 @@ export function VideoGenForm() {
   }
 
   async function handleRegenerateSegment(segment: MultiVideoSegmentGenerationResult) {
-    setSegmentRefreshing((prev) => ({ ...prev, [segment.segment_index]: true }));
+    const taskId = activeTask?.task_id;
+    if (!taskId) return;
+    const refreshKey = getSegmentStateKey(segment.segment_index);
+    setSegmentRefreshing((prev) => ({ ...prev, [refreshKey]: true }));
     setError("");
     try {
       const previousSegment =
-        batchResult?.segments.find((item) => item.segment_index === segment.segment_index - 1) ?? null;
+        displayBatchResult?.segments.find((item) => item.segment_index === segment.segment_index - 1) ??
+        null;
       const previousOutput = previousSegment?.generation?.outputs[0] ?? null;
       const previousLastFrameUrl = getLastFrameUrl(previousOutput);
       const response = await regenerateMultiVideoSegment({
@@ -385,34 +427,46 @@ export function VideoGenForm() {
         previous_segment_last_frame_url:
           segment.use_previous_segment_last_frame ? previousLastFrameUrl : null,
       });
-      setBatchResult((prev) =>
-        prev
-          ? {
-              ...prev,
-              segments: prev.segments.map((item) =>
-                item.segment_index === response.segment_index ? response : item
-              ),
-            }
-          : prev
+      setTaskRecords((prev) =>
+        prev.map((task) =>
+          task.task_id === taskId && task.batch_result
+            ? {
+                ...task,
+                batch_result: {
+                  ...task.batch_result,
+                  segments: task.batch_result.segments.map((item) =>
+                    item.segment_index === response.segment_index ? response : item
+                  ),
+                },
+                updated_at: new Date().toISOString(),
+              }
+            : task
+        )
       );
       setActiveSegmentIndex(segment.segment_index);
     } catch (err) {
       setError(err instanceof Error ? err.message : "重生成失败");
     } finally {
-      setSegmentRefreshing((prev) => ({ ...prev, [segment.segment_index]: false }));
+      setSegmentRefreshing((prev) => ({ ...prev, [refreshKey]: false }));
     }
   }
 
-  async function handleSaveToAssets() {
-    if (!result) return;
-    if (savedAssets.length > 0) return;
+  async function handleSaveToAssets(task: VideoGenerationTaskResponse) {
+    if (!task.result) return;
+    if ((taskAssetStates[task.task_id]?.savedAssets.length ?? 0) > 0) return;
     const categoryValue = saveCategory.trim() || "生成";
 
-    setSavingAssets(true);
-    setSaveError("");
+    setTaskAssetStates((prev) => ({
+      ...prev,
+      [task.task_id]: {
+        saving: true,
+        error: "",
+        savedAssets: prev[task.task_id]?.savedAssets ?? [],
+      },
+    }));
     try {
       const assets = await Promise.all(
-        result.outputs.map((output, index) => {
+        task.result.outputs.map((output, index) => {
           const srcUrl = output.url ?? null;
           const base64 = output.base64_data ?? null;
           if (!srcUrl && !base64) {
@@ -427,29 +481,38 @@ export function VideoGenForm() {
               content_base64: base64,
               mime_type: output.mime_type ?? "video/mp4",
               metadata: output.metadata ?? {},
-              provider_id: result.provider_id,
-              model: result.model,
+              provider_id: task.result?.provider_id,
+              model: task.result?.model,
               tags: [],
             },
             { origin: "generated" }
           );
         })
       );
-      setSavedAssets(assets);
+      setTaskAssetStates((prev) => ({
+        ...prev,
+        [task.task_id]: { saving: false, error: "", savedAssets: assets },
+      }));
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "保存失败");
-    } finally {
-      setSavingAssets(false);
+      setTaskAssetStates((prev) => ({
+        ...prev,
+        [task.task_id]: {
+          saving: false,
+          error: err instanceof Error ? err.message : "保存失败",
+          savedAssets: prev[task.task_id]?.savedAssets ?? [],
+        },
+      }));
     }
   }
 
   async function handleSaveSegmentToAssets(segment: MultiVideoSegmentGenerationResult) {
     if (!segment.generation) return;
+    const stateKey = getSegmentStateKey(segment.segment_index);
     const generation = segment.generation;
     const categoryValue = saveCategory.trim() || "生成";
     setSegmentAssetStates((prev) => ({
       ...prev,
-      [segment.segment_index]: { saving: true, error: "", savedAssets: prev[segment.segment_index]?.savedAssets ?? [] },
+      [stateKey]: { saving: true, error: "", savedAssets: prev[stateKey]?.savedAssets ?? [] },
     }));
     try {
       const assets = await Promise.all(
@@ -479,15 +542,15 @@ export function VideoGenForm() {
       );
       setSegmentAssetStates((prev) => ({
         ...prev,
-        [segment.segment_index]: { saving: false, error: "", savedAssets: assets },
+        [stateKey]: { saving: false, error: "", savedAssets: assets },
       }));
     } catch (err) {
       setSegmentAssetStates((prev) => ({
         ...prev,
-        [segment.segment_index]: {
+        [stateKey]: {
           saving: false,
           error: err instanceof Error ? err.message : "保存失败",
-          savedAssets: prev[segment.segment_index]?.savedAssets ?? [],
+          savedAssets: prev[stateKey]?.savedAssets ?? [],
         },
       }));
     }
@@ -519,7 +582,6 @@ export function VideoGenForm() {
   function handleModeSwitch(nextMode: GenerationMode) {
     setMode(nextMode);
     setError("");
-    setSaveError("");
   }
 
   function toggleSegmentBridge(segmentIndex: number) {
@@ -542,6 +604,10 @@ export function VideoGenForm() {
 
   function getSegmentBridgeLabel(segment: VideoSegmentPlan) {
     return segment.use_previous_segment_last_frame ? "已衔接首尾帧" : "衔接首尾帧";
+  }
+
+  function getSegmentStateKey(segmentIndex: number) {
+    return activeTaskId ? `${activeTaskId}:${segmentIndex}` : `segment:${segmentIndex}`;
   }
 
   function renderSelectedTextAssets() {
@@ -892,8 +958,8 @@ export function VideoGenForm() {
             {busy && <span className="spinner" />}
             {mode === "single"
               ? loading
-                ? "生成中..."
-                : "生成视频"
+                ? "提交中..."
+                : "提交视频任务"
               : planning
                 ? "规划中..."
                 : "生成切分方案"}
@@ -906,7 +972,7 @@ export function VideoGenForm() {
               disabled={busy}
             >
               {batchLoading && <span className="spinner spinner-dark" />}
-              {batchLoading ? "批量生成中..." : "确认并批量生成"}
+              {batchLoading ? "提交中..." : "确认并加入队列"}
             </button>
           )}
         </div>
@@ -914,6 +980,87 @@ export function VideoGenForm() {
 
       <div className="gen-results gen-results-scroll">
         {error && <div className="error-banner">{error}</div>}
+        <section className="panel form-stack video-task-records-panel">
+          <div className="video-task-records-head">
+            <div>
+              <label className="form-label">生成记录</label>
+              <p className="form-hint">
+                视频生成会异步排队并自动轮询。选择一条记录可查看详情和下载结果。
+              </p>
+            </div>
+            <div className="form-actions video-task-records-actions">
+              {hasPendingTasks && <span className="tag-pill">自动刷新中</span>}
+              <button
+                className="btn btn-secondary btn-sm"
+                type="button"
+                onClick={() => {
+                  setTaskRecordsRefreshing(true);
+                  void loadTaskRecords({ silent: true });
+                }}
+                disabled={taskRecordsRefreshing}
+              >
+                {taskRecordsRefreshing ? "刷新中..." : "刷新记录"}
+              </button>
+            </div>
+          </div>
+
+          {taskRecordsError && <div className="error-banner">{taskRecordsError}</div>}
+
+          {taskRecordsLoading && taskRecords.length === 0 ? (
+            <div className="gen-empty video-task-empty">
+              <span className="spinner spinner-dark" />
+              <p>正在加载生成记录...</p>
+            </div>
+          ) : taskRecords.length === 0 ? (
+            <div className="gen-empty video-task-empty">
+              <p>还没有视频生成记录，提交任务后会在这里持续更新。</p>
+            </div>
+          ) : (
+            <div className="video-task-list">
+              {taskRecords.map((task) => {
+                const isActive = task.task_id === activeTaskId;
+                const batchSegments = task.batch_result?.segments ?? [];
+                const successCount = batchSegments.filter((item) => item.status === "success").length;
+                const errorCount = batchSegments.filter((item) => item.status === "error").length;
+                return (
+                  <button
+                    key={task.task_id}
+                    className={`video-task-card${isActive ? " is-active" : ""}`}
+                    type="button"
+                    onClick={() => setActiveTaskId(task.task_id)}
+                  >
+                    <div className="video-task-card-head">
+                      <span className="tag-pill">
+                        {task.task_kind === "single" ? "单视频" : "多视频"}
+                      </span>
+                      <span
+                        className={`video-task-status video-task-status-${task.status}`}
+                      >
+                        {getVideoTaskStatusLabel(task.status)}
+                      </span>
+                    </div>
+                    <strong>{task.request_summary}</strong>
+                    <div className="video-task-card-meta">
+                      <span>{task.model}</span>
+                      <span>{formatTaskTimestamp(task.created_at)}</span>
+                      <span>
+                        {task.task_kind === "single"
+                          ? `${task.requested_count} 段输出`
+                          : `${task.requested_segment_count ?? 0} 段分镜`}
+                      </span>
+                    </div>
+                    {task.task_kind === "multi" && batchSegments.length > 0 && (
+                      <div className="video-task-card-foot">
+                        <span>成功 {successCount}</span>
+                        <span>失败 {errorCount}</span>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         <div className="panel form-stack">
           <div className="form-row">
@@ -930,39 +1077,62 @@ export function VideoGenForm() {
             <div className="form-group">
               <label className="form-label">处理状态</label>
               <div className="info-banner" style={{ minHeight: 48 }}>
-                {busy ? `处理中，已用时 ${formatElapsed(elapsedMs)}` : "等待开始生成"}
+                {busy
+                  ? `处理中，已用时 ${formatElapsed(elapsedMs)}`
+                  : activeTask
+                    ? getVideoTaskStatusDescription(activeTask)
+                    : "等待开始生成"}
               </div>
             </div>
           </div>
-          {mode === "single" && result && (
+          {activeTask?.task_kind === "single" && displayResult && (
             <div className="form-actions" style={{ paddingTop: 0 }}>
               <button
                 className="btn btn-secondary"
                 type="button"
-                onClick={handleSaveToAssets}
-                disabled={savingAssets || savedAssets.length > 0}
+                onClick={() => void handleSaveToAssets(activeTask)}
+                disabled={
+                  activeTaskAssetState?.saving ||
+                  (activeTaskAssetState?.savedAssets.length ?? 0) > 0
+                }
               >
-                {savingAssets && <span className="spinner spinner-dark" />}
-                {savedAssets.length > 0 ? "已加入素材库" : "加入素材库"}
+                {activeTaskAssetState?.saving && <span className="spinner spinner-dark" />}
+                {(activeTaskAssetState?.savedAssets.length ?? 0) > 0
+                  ? "已加入素材库"
+                  : "加入素材库"}
               </button>
-              {savedAssets.length > 0 && (
+              {(activeTaskAssetState?.savedAssets.length ?? 0) > 0 && (
                 <span style={{ color: "var(--muted)", fontSize: "0.88rem" }}>
-                  已保存 {savedAssets.length} 个
+                  已保存 {activeTaskAssetState?.savedAssets.length ?? 0} 个
                 </span>
               )}
             </div>
           )}
-          {saveError && <div className="error-banner">{saveError}</div>}
+          {activeTaskAssetState?.error && <div className="error-banner">{activeTaskAssetState.error}</div>}
         </div>
 
-        {mode === "single" && result && (
+        {activeTask && activeTask.status !== "completed" && (
+          <section className="panel form-stack video-task-active-panel">
+            <div className="info-banner">{getVideoTaskStatusDescription(activeTask)}</div>
+            <div className="video-task-active-meta">
+              <span>{activeTask.task_kind === "single" ? "单视频任务" : "多视频任务"}</span>
+              <span>{activeTask.model}</span>
+              <span>更新于 {formatTaskTimestamp(activeTask.updated_at)}</span>
+            </div>
+            <div className="gen-text-output">{activeTask.request_summary}</div>
+            {activeTask.error_detail && <div className="error-banner">{activeTask.error_detail}</div>}
+          </section>
+        )}
+
+        {activeTask?.task_kind === "single" && displayResult && (
           <>
             <div className="info-banner">
-              已生成 {result.outputs.length} 段视频 · {result.resolved_prompt.slice(0, 80)}
-              {result.resolved_prompt.length > 80 ? "..." : ""}
+              已生成 {displayResult.outputs.length} 段视频 ·{" "}
+              {displayResult.resolved_prompt.slice(0, 80)}
+              {displayResult.resolved_prompt.length > 80 ? "..." : ""}
             </div>
             <div className="gen-output-grid">
-              {result.outputs.map((output) => (
+              {displayResult.outputs.map((output) => (
                 <div key={output.index} className="gen-output-card">
                   {output.url && (
                     <video src={output.url} controls poster={output.cover_image_url ?? undefined} />
@@ -1006,7 +1176,7 @@ export function VideoGenForm() {
           </>
         )}
 
-        {mode === "multi" && plan && (
+        {mode === "multi" && plan && !activeTask && (
           <section className="panel form-stack">
             <div className="info-banner">
               切分方案已生成 · 共 {plan.segment_count} 段 · 规划 Token
@@ -1050,18 +1220,19 @@ export function VideoGenForm() {
           </section>
         )}
 
-        {mode === "multi" && batchResult && (
+        {activeTask?.task_kind === "multi" && displayBatchResult && (
           <>
             <div className="info-banner">
               批量生成完成 · 成功{" "}
-              {batchResult.segments.filter((item) => item.status === "success").length} 段 · 失败{" "}
-              {batchResult.segments.filter((item) => item.status === "error").length} 段
+              {displayBatchResult.segments.filter((item) => item.status === "success").length} 段 ·
+              失败 {displayBatchResult.segments.filter((item) => item.status === "error").length} 段
             </div>
             <div className="segment-plan-list">
-              {batchResult.segments.map((segment) => {
+              {displayBatchResult.segments.map((segment) => {
                 const firstOutput = segment.generation?.outputs[0] ?? null;
-                const saveState = segmentAssetStates[segment.segment_index];
-                const refreshing = !!segmentRefreshing[segment.segment_index];
+                const stateKey = getSegmentStateKey(segment.segment_index);
+                const saveState = segmentAssetStates[stateKey];
+                const refreshing = !!segmentRefreshing[stateKey];
                 return (
                   <article key={segment.segment_index} className="segment-plan-card">
                     <div className="segment-plan-card-head">
@@ -1140,8 +1311,14 @@ export function VideoGenForm() {
           </>
         )}
 
-        {((mode === "single" && !result && !error) ||
-          (mode === "multi" && !plan && !batchResult && !error)) && (
+        {!activeTask && taskRecords.length > 0 && (
+          <div className="gen-empty">
+            <p>从上方生成记录中选择一条任务查看详情。</p>
+          </div>
+        )}
+
+        {((mode === "single" && taskRecords.length === 0 && !error) ||
+          (mode === "multi" && !plan && taskRecords.length === 0 && !error)) && (
           <div className="gen-empty-shell">
             <div className="gen-empty">
               <div className="gen-empty-icon">
@@ -1239,9 +1416,11 @@ export function VideoGenForm() {
                   className="btn btn-secondary"
                   type="button"
                   onClick={() => void handleRegenerateSegment(activeSegment)}
-                  disabled={!!segmentRefreshing[activeSegment.segment_index]}
+                  disabled={!!segmentRefreshing[getSegmentStateKey(activeSegment.segment_index)]}
                 >
-                  {segmentRefreshing[activeSegment.segment_index] ? "重生成中..." : "重生成"}
+                  {segmentRefreshing[getSegmentStateKey(activeSegment.segment_index)]
+                    ? "重生成中..."
+                    : "重生成"}
                 </button>
                 {activeSegment.generation?.outputs[0] && (
                   <>
@@ -1262,22 +1441,24 @@ export function VideoGenForm() {
                       type="button"
                       onClick={() => void handleSaveSegmentToAssets(activeSegment)}
                       disabled={
-                        segmentAssetStates[activeSegment.segment_index]?.saving ||
-                        (segmentAssetStates[activeSegment.segment_index]?.savedAssets.length ?? 0) > 0
+                        segmentAssetStates[getSegmentStateKey(activeSegment.segment_index)]?.saving ||
+                        (segmentAssetStates[getSegmentStateKey(activeSegment.segment_index)]
+                          ?.savedAssets.length ?? 0) > 0
                       }
                     >
-                      {segmentAssetStates[activeSegment.segment_index]?.saving
+                      {segmentAssetStates[getSegmentStateKey(activeSegment.segment_index)]?.saving
                         ? "保存中..."
-                        : (segmentAssetStates[activeSegment.segment_index]?.savedAssets.length ?? 0) > 0
+                        : (segmentAssetStates[getSegmentStateKey(activeSegment.segment_index)]
+                            ?.savedAssets.length ?? 0) > 0
                           ? "已存素材库"
                           : "存入素材库"}
                     </button>
                   </>
                 )}
               </div>
-              {segmentAssetStates[activeSegment.segment_index]?.error && (
+              {segmentAssetStates[getSegmentStateKey(activeSegment.segment_index)]?.error && (
                 <div className="error-banner">
-                  {segmentAssetStates[activeSegment.segment_index]?.error}
+                  {segmentAssetStates[getSegmentStateKey(activeSegment.segment_index)]?.error}
                 </div>
               )}
             </div>
@@ -1429,4 +1610,46 @@ function getLastFrameUrl(
           ? metadata.tail_frame_url
           : null;
   return metadataLastFrame ?? output.cover_image_url ?? null;
+}
+
+function getVideoTaskStatusLabel(status: VideoGenerationTaskResponse["status"]) {
+  switch (status) {
+    case "queued":
+      return "排队中";
+    case "running":
+      return "生成中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+    default:
+      return status;
+  }
+}
+
+function getVideoTaskStatusDescription(task: VideoGenerationTaskResponse) {
+  const updatedAt = formatTaskTimestamp(task.updated_at);
+  switch (task.status) {
+    case "queued":
+      return `任务已加入队列 · ${updatedAt}`;
+    case "running":
+      return `任务正在异步生成 · ${updatedAt}`;
+    case "completed":
+      return task.task_kind === "single"
+        ? `单视频任务已完成 · ${updatedAt}`
+        : `多视频任务已完成 · ${updatedAt}`;
+    case "failed":
+      return `任务执行失败 · ${updatedAt}`;
+    default:
+      return "等待开始生成";
+  }
+}
+
+function formatTaskTimestamp(value: string) {
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

@@ -62,7 +62,7 @@ _BUILTIN_PROVIDER_DEFS = (
         "routes": {
             "text": {"path": "/v1/chat/completions", "timeout_seconds": 60.0},
             "image": {"path": "/v1/images/generations", "timeout_seconds": 120.0},
-            "video": {"path": "/video/generations", "timeout_seconds": 60.0},
+            "video": {"path": "/video/generations", "timeout_seconds": 600.0},
         },
     },
 )

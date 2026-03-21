@@ -25,6 +25,9 @@ from services.api.app.services.generation_service import GenerationService
 from services.api.app.services.project_service import InMemoryProjectService
 from services.api.app.services.provider_service import InMemoryProviderService
 from services.api.app.services.task_service import InMemoryTaskService
+from services.api.app.services.video_generation_task_service import (
+    InMemoryVideoGenerationTaskService,
+)
 
 logger = logging.getLogger(__name__)
 startup_logger = logging.getLogger("uvicorn.error")
@@ -42,6 +45,7 @@ async def lifespan(app: FastAPI):
     startup_logger.info("Database ready: %s", settings.database_log_description)
     session_factory = create_session_factory(engine)
     app.state.db_engine = engine
+    app.state.session_factory = session_factory
 
     app.state.auth_service = InMemoryAuthService(
         jwt_secret=settings.jwt_secret,
@@ -59,6 +63,10 @@ async def lifespan(app: FastAPI):
         asset_service=app.state.asset_service,
         provider_gateway=app.state.provider_gateway,
         call_log_service=app.state.call_log_service,
+    )
+    app.state.video_generation_task_service = InMemoryVideoGenerationTaskService(
+        session_factory=session_factory,
+        generation_service=app.state.generation_service,
     )
     yield
     engine.dispose()

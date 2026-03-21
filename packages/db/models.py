@@ -100,3 +100,32 @@ class CallLogRow(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     token_usage_json: Mapped[dict[str, Any] | None] = mapped_column("token_usage", JSON, nullable=True)
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class VideoGenerationTaskRow(Base):
+    __tablename__ = "video_generation_tasks"
+
+    task_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    task_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
+    provider_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_summary: Mapped[str] = mapped_column(String(200), nullable=False)
+    prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scene_prompt_texts_json: Mapped[list[str]] = mapped_column(
+        "scene_prompt_texts",
+        JSON,
+        nullable=False,
+    )
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    requested_segment_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_json: Mapped[dict[str, Any] | None] = mapped_column("result", JSON, nullable=True)
+    batch_result_json: Mapped[dict[str, Any] | None] = mapped_column(
+        "batch_result",
+        JSON,
+        nullable=True,
+    )
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False)

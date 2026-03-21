@@ -9,6 +9,8 @@ from packages.shared.contracts.generations import (
     MultiVideoSegmentRegenerationRequest,
     TextGenerationRequest,
     TextGenerationResponse,
+    VideoGenerationTaskListResponse,
+    VideoGenerationTaskResponse,
     VideoGenerationRequest,
 )
 
@@ -23,5 +25,7 @@ __all__ = [
     "MultiVideoSegmentRegenerationRequest",
     "TextGenerationRequest",
     "TextGenerationResponse",
+    "VideoGenerationTaskListResponse",
+    "VideoGenerationTaskResponse",
     "VideoGenerationRequest",
 ]

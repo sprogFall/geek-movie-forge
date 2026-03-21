@@ -31,7 +31,7 @@ const routeLabels: Record<RouteKey, string> = {
 const routeDefaults = {
   text: { path: "/text/generations", timeout_seconds: 60 },
   image: { path: "/image/generations", timeout_seconds: 60 },
-  video: { path: "/video/generations", timeout_seconds: 60 },
+  video: { path: "/video/generations", timeout_seconds: 600 },
 } satisfies RoutesState;
 
 function createDefaultRoutes(): RoutesState {

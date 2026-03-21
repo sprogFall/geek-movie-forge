@@ -331,25 +331,42 @@ class GenerationService:
         segments: list[MultiVideoSegmentGenerationResult] = []
         previous_segment_last_frame: VideoInputMaterial | None = None
         for segment in payload.segments:
-            segment_image_materials = _build_multi_video_segment_image_materials(
-                base_materials=base_image_materials,
-                previous_segment_last_frame=previous_segment_last_frame,
-                segment=segment,
-                provider_adapter_type=provider.adapter_type,
-            )
-            segment_result = await self._generate_multi_video_segment(
-                owner_id=owner_id,
-                provider=provider,
-                model=payload.model,
-                prompt=payload.prompt,
-                preset_prompt=payload.preset_prompt,
-                segment=segment,
-                image_materials=segment_image_materials,
-                scene_prompt_texts=global_scene_prompt_texts,
-                provider_adapter_type=provider.adapter_type,
-                save=payload.save,
-                options=payload.options,
-            )
+            try:
+                segment_image_materials = _build_multi_video_segment_image_materials(
+                    base_materials=base_image_materials,
+                    previous_segment_last_frame=previous_segment_last_frame,
+                    segment=segment,
+                    provider_adapter_type=provider.adapter_type,
+                )
+                segment_result = await self._generate_multi_video_segment(
+                    owner_id=owner_id,
+                    provider=provider,
+                    model=payload.model,
+                    prompt=payload.prompt,
+                    preset_prompt=payload.preset_prompt,
+                    segment=segment,
+                    image_materials=segment_image_materials,
+                    scene_prompt_texts=global_scene_prompt_texts,
+                    provider_adapter_type=provider.adapter_type,
+                    save=payload.save,
+                    options=payload.options,
+                )
+            except ServiceError as exc:
+                segment_result = MultiVideoSegmentGenerationResult(
+                    segment_index=segment.segment_index,
+                    title=segment.title,
+                    duration_seconds=segment.duration_seconds,
+                    visual_prompt=segment.visual_prompt,
+                    narration_text=segment.narration_text,
+                    use_previous_segment_last_frame=segment.use_previous_segment_last_frame,
+                    resolved_prompt=_build_multi_video_segment_prompt(
+                        prompt=payload.prompt,
+                        preset_prompt=payload.preset_prompt,
+                        segment=segment,
+                    ),
+                    status="error",
+                    error_detail=str(exc),
+                )
             segments.append(segment_result)
             previous_segment_last_frame = _extract_last_frame_material(segment_result)
         return MultiVideoGenerationResponse(
@@ -946,6 +963,8 @@ def _build_multi_video_segment_options(
         options,
         provider_adapter_type=provider_adapter_type,
     )
+    if provider_adapter_type == "volcengine_ark":
+        segment_options["return_last_frame"] = True
     segment_options.setdefault("duration", segment.duration_seconds)
     segment_options.setdefault("duration_seconds", segment.duration_seconds)
     if (
@@ -979,6 +998,14 @@ def _build_multi_video_segment_image_materials(
     provider_adapter_type: str,
 ) -> list[VideoInputMaterial]:
     materials = list(base_materials)
+    if (
+        provider_adapter_type == "volcengine_ark"
+        and segment.use_previous_segment_last_frame
+        and previous_segment_last_frame is None
+    ):
+        raise ValidationServiceError(
+            "Volcengine frame stitching requires the previous segment's last-frame image; regenerate the previous segment or provide a reference image"
+        )
     if not segment.use_previous_segment_last_frame or previous_segment_last_frame is None:
         return materials
 

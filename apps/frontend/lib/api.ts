@@ -14,6 +14,8 @@ import type {
   MultiVideoPlanResponse,
   MultiVideoGenerationResponse,
   MultiVideoSegmentGenerationResult,
+  VideoGenerationTaskListResponse,
+  VideoGenerationTaskResponse,
   CallLogListResponse,
   CallLogResponse,
 } from "@/types/api";
@@ -68,7 +70,9 @@ export function setOnUnauthorized(cb: () => void) {
 }
 
 const DEFAULT_TIMEOUT = 10_000; // 普通请求 10 秒
-const LONG_TIMEOUT = 300_000; // 生成类请求 5 分钟
+const LONG_TIMEOUT = 600_000; // 生成类请求 10 分钟
+const VIDEO_TIMEOUT = 900_000; // 视频生成请求 15 分钟
+const SUBMIT_TIMEOUT = 30_000; // 异步提交只等待任务创建
 
 type RequestOptions = RequestInit & { timeout?: number };
 
@@ -214,7 +218,15 @@ export function generateVideos(body: Record<string, unknown>) {
   return request<MediaGenerationResponse>("/api/v1/generations/videos", {
     method: "POST",
     body: JSON.stringify(body),
-    timeout: LONG_TIMEOUT,
+    timeout: VIDEO_TIMEOUT,
+  });
+}
+
+export function createVideoGenerationTask(body: Record<string, unknown>) {
+  return request<VideoGenerationTaskResponse>("/api/v1/generations/videos/async", {
+    method: "POST",
+    body: JSON.stringify(body),
+    timeout: SUBMIT_TIMEOUT,
   });
 }
 
@@ -230,7 +242,15 @@ export function generateMultiVideos(body: Record<string, unknown>) {
   return request<MultiVideoGenerationResponse>("/api/v1/generations/videos/batch", {
     method: "POST",
     body: JSON.stringify(body),
-    timeout: LONG_TIMEOUT,
+    timeout: VIDEO_TIMEOUT,
+  });
+}
+
+export function createMultiVideoGenerationTask(body: Record<string, unknown>) {
+  return request<VideoGenerationTaskResponse>("/api/v1/generations/videos/batch/async", {
+    method: "POST",
+    body: JSON.stringify(body),
+    timeout: SUBMIT_TIMEOUT,
   });
 }
 
@@ -238,8 +258,16 @@ export function regenerateMultiVideoSegment(body: Record<string, unknown>) {
   return request<MultiVideoSegmentGenerationResult>("/api/v1/generations/videos/segments/regenerate", {
     method: "POST",
     body: JSON.stringify(body),
-    timeout: LONG_TIMEOUT,
+    timeout: VIDEO_TIMEOUT,
   });
+}
+
+export function listVideoGenerationTasks() {
+  return request<VideoGenerationTaskListResponse>("/api/v1/generations/video-tasks");
+}
+
+export function getVideoGenerationTask(id: string) {
+  return request<VideoGenerationTaskResponse>(`/api/v1/generations/video-tasks/${id}`);
 }
 
 export function generateTexts(body: Record<string, unknown>) {

@@ -157,6 +157,31 @@ export type MultiVideoGenerationResponse = {
   segments: MultiVideoSegmentGenerationResult[];
 };
 
+export type VideoGenerationTaskKind = "single" | "multi";
+export type VideoGenerationTaskStatus = "queued" | "running" | "completed" | "failed";
+
+export type VideoGenerationTaskResponse = {
+  task_id: string;
+  task_kind: VideoGenerationTaskKind;
+  status: VideoGenerationTaskStatus;
+  provider_id: string;
+  model: string;
+  request_summary: string;
+  prompt: string | null;
+  scene_prompt_texts: string[];
+  requested_count: number;
+  requested_segment_count: number | null;
+  error_detail: string | null;
+  result: MediaGenerationResponse | null;
+  batch_result: MultiVideoGenerationResponse | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type VideoGenerationTaskListResponse = {
+  items: VideoGenerationTaskResponse[];
+};
+
 export type TextGenerationResponse = {
   generation_id: string;
   capability: "text";

@@ -936,6 +936,124 @@ select {
   align-items: center;
 }
 
+.video-task-records-panel {
+  gap: 14px;
+}
+
+.video-task-records-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.video-task-records-head .form-hint {
+  margin-top: 4px;
+}
+
+.video-task-records-actions {
+  padding-top: 0;
+  align-items: center;
+}
+
+.video-task-list {
+  display: grid;
+  gap: 10px;
+}
+
+.video-task-card {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.88)),
+    rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.video-task-card:hover {
+  border-color: rgba(3, 105, 161, 0.28);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.1);
+  transform: translateY(-1px);
+}
+
+.video-task-card.is-active {
+  border-color: rgba(3, 105, 161, 0.42);
+  box-shadow: 0 0 0 2px rgba(3, 105, 161, 0.12), 0 16px 32px rgba(15, 23, 42, 0.12);
+}
+
+.video-task-card-head,
+.video-task-card-meta,
+.video-task-card-foot,
+.video-task-active-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.video-task-card strong {
+  font-size: 0.96rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.video-task-card-meta,
+.video-task-card-foot,
+.video-task-active-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.video-task-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.video-task-status-queued {
+  background: rgba(180, 83, 9, 0.12);
+  color: rgba(146, 64, 14, 1);
+  border-color: rgba(180, 83, 9, 0.15);
+}
+
+.video-task-status-running {
+  background: rgba(3, 105, 161, 0.12);
+  color: rgba(3, 105, 161, 1);
+  border-color: rgba(3, 105, 161, 0.15);
+}
+
+.video-task-status-completed {
+  background: rgba(22, 163, 74, 0.12);
+  color: rgba(21, 128, 61, 1);
+  border-color: rgba(22, 163, 74, 0.16);
+}
+
+.video-task-status-failed {
+  background: rgba(220, 38, 38, 0.12);
+  color: rgba(185, 28, 28, 1);
+  border-color: rgba(220, 38, 38, 0.16);
+}
+
+.video-task-active-panel {
+  gap: 14px;
+}
+
+.video-task-empty {
+  min-height: 180px;
+}
+
 .selected-text-list,
 .segment-plan-list {
   display: grid;
@@ -1625,6 +1743,11 @@ select {
   .video-brief-head .form-hint {
     max-width: none;
     text-align: left;
+  }
+
+  .video-task-records-head {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .segment-bridge-toggle {

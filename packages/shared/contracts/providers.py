@@ -40,7 +40,7 @@ def _default_image_endpoint() -> ProviderEndpointConfig:
 
 
 def _default_video_endpoint() -> ProviderEndpointConfig:
-    return ProviderEndpointConfig(path="/video/generations")
+    return ProviderEndpointConfig(path="/video/generations", timeout_seconds=600.0)
 
 
 class ProviderRoutes(BaseModel):

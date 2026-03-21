@@ -68,6 +68,7 @@ def test_create_and_update_provider_configuration() -> None:
         assert body["models"] == create_payload["models"]
         assert body["routes"]["image"]["path"] == "/image/generations"
         assert body["routes"]["video"]["path"] == "/video/generations"
+        assert body["routes"]["video"]["timeout_seconds"] == 600.0
         assert body["is_builtin"] is False
 
         update_payload = {

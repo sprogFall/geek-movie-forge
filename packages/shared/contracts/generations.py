@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -294,3 +295,25 @@ class MultiVideoGenerationResponse(BaseModel):
     prompt: str
     segment_count: int
     segments: list[MultiVideoSegmentGenerationResult] = Field(default_factory=list)
+
+
+class VideoGenerationTaskResponse(BaseModel):
+    task_id: str
+    task_kind: Literal["single", "multi"]
+    status: Literal["queued", "running", "completed", "failed"]
+    provider_id: str
+    model: str
+    request_summary: str
+    prompt: str | None = None
+    scene_prompt_texts: list[str] = Field(default_factory=list)
+    requested_count: int = Field(default=1, ge=1)
+    requested_segment_count: int | None = Field(default=None, ge=1)
+    error_detail: str | None = None
+    result: MediaGenerationResponse | None = None
+    batch_result: MultiVideoGenerationResponse | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class VideoGenerationTaskListResponse(BaseModel):
+    items: list[VideoGenerationTaskResponse] = Field(default_factory=list)
