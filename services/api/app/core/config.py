@@ -1,10 +1,33 @@
 from functools import lru_cache
 from os import getenv
+from pathlib import Path
 from typing import Literal, Self
 
+from dotenv import load_dotenv
 from pydantic import BaseModel, field_validator, model_validator
+from sqlalchemy.engine import URL, make_url
 
 _DEFAULT_JWT_SECRET = "local-dev-jwt-secret-change-me-1234"
+
+
+def _find_project_root(start_path: Path | None = None) -> Path:
+    current_path = (start_path or Path(__file__)).resolve()
+    search_dir = current_path if current_path.is_dir() else current_path.parent
+    for candidate in (search_dir, *search_dir.parents):
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+    return search_dir
+
+
+def _load_dotenv(start_path: Path | None = None) -> None:
+    """Load the project root .env file when present."""
+    root_dir = _find_project_root(start_path)
+    env_path = root_dir / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+
+
+_load_dotenv()
 
 _DEFAULT_LOCAL_CORS_ORIGINS = (
     "http://localhost:3000",
@@ -65,10 +88,24 @@ class Settings(BaseModel):
     def database_url(self) -> str:
         if self.db_backend == "sqlite":
             return f"sqlite+pysqlite:///{self.sqlite_path}"
+        return URL.create(
+            drivername="mysql+pymysql",
+            username=self.mysql_user,
+            password=self.mysql_password,
+            host=self.mysql_host,
+            port=self.mysql_port,
+            database=self.mysql_database,
+        ).render_as_string(hide_password=False)
+
+    @property
+    def database_log_description(self) -> str:
+        if self.db_backend == "sqlite":
+            return f"backend=sqlite path={self.sqlite_path}"
+        database_url = make_url(self.database_url)
         return (
-            "mysql+pymysql://"
-            f"{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/"
-            f"{self.mysql_database}"
+            f"backend={self.db_backend} driver={database_url.drivername} "
+            f"host={database_url.host} port={database_url.port} "
+            f"database={database_url.database} user={database_url.username}"
         )
 
 

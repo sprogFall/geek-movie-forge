@@ -27,16 +27,19 @@ from services.api.app.services.provider_service import InMemoryProviderService
 from services.api.app.services.task_service import InMemoryTaskService
 
 logger = logging.getLogger(__name__)
+startup_logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    startup_logger.info("Database connect target: %s", settings.database_log_description)
     engine = create_database_engine(
         db_backend=settings.db_backend,
         database_url=settings.database_url,
     )
     initialize_database(engine)
+    startup_logger.info("Database ready: %s", settings.database_log_description)
     session_factory = create_session_factory(engine)
     app.state.db_engine = engine
 
