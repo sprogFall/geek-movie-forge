@@ -250,21 +250,9 @@ class InMemoryProviderService:
                 changed = True
                 continue
 
-            if (
-                row.name != item["name"]
-                or row.base_url != item["base_url"]
-                or row.api_key != desired_api_key
-                or row.adapter_type != item["adapter_type"]
-                or row.models_json != desired_models
-                or row.routes_json != desired_routes
-                or not row.is_builtin
-            ):
-                row.name = item["name"]
-                row.base_url = item["base_url"]
-                row.api_key = desired_api_key
-                row.adapter_type = item["adapter_type"]
-                row.models_json = desired_models
-                row.routes_json = desired_routes
+            # Built-in providers are user-editable after initialization.
+            # Preserve stored API keys, models, routes, and names on later reads.
+            if not row.is_builtin:
                 row.is_builtin = True
                 row.updated_at = datetime.now(UTC).isoformat()
                 changed = True

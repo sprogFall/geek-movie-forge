@@ -231,6 +231,62 @@ def test_update_builtin_provider_keeps_builtin_marker() -> None:
     assert delete_response.status_code == 409
 
 
+def test_update_builtin_provider_persists_custom_api_key_and_models() -> None:
+    updated_models = [
+        {
+            "model": "Qwen/Qwen2.5-72B-Instruct",
+            "capabilities": ["text"],
+            "label": "Qwen 72B",
+        },
+        {
+            "model": "Qwen/Qwen-Image-Edit",
+            "capabilities": ["image"],
+            "label": "Qwen Image Edit",
+        },
+    ]
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client, username="builtin_provider_editor")
+        list_response = client.get("/api/v1/providers", headers=headers)
+        builtin = _find_builtin_provider(list_response.json()["items"], "modelscope")
+
+        update_response = client.put(
+            f"/api/v1/providers/{builtin['provider_id']}",
+            json={
+                "api_key": "ms-persisted-token-123456",
+                "models": updated_models,
+            },
+            headers=headers,
+        )
+        detail_response = client.get(
+            f"/api/v1/providers/{builtin['provider_id']}",
+            headers=headers,
+        )
+        second_list_response = client.get("/api/v1/providers", headers=headers)
+
+    assert update_response.status_code == 200
+    assert detail_response.status_code == 200
+    assert second_list_response.status_code == 200
+
+    updated_body = update_response.json()
+    detail_body = detail_response.json()
+    listed_body = _find_builtin_provider(second_list_response.json()["items"], "modelscope")
+
+    assert updated_body["is_builtin"] is True
+    assert updated_body["api_key_masked"].startswith("ms-")
+    assert updated_body["api_key_masked"].endswith("456")
+    assert updated_body["models"] == updated_models
+
+    assert detail_body["is_builtin"] is True
+    assert detail_body["api_key_masked"].startswith("ms-")
+    assert detail_body["api_key_masked"].endswith("456")
+    assert detail_body["models"] == updated_models
+
+    assert listed_body["api_key_masked"].startswith("ms-")
+    assert listed_body["api_key_masked"].endswith("456")
+    assert listed_body["models"] == updated_models
+
+
 def test_delete_other_users_provider_returns_404() -> None:
     payload = {
         "name": "Private Provider",
