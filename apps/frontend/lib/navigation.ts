@@ -31,7 +31,7 @@ export const navigationSections: NavSection[] = [
       {
         href: "/generations/videos",
         label: "视频",
-        description: "根据提示词与参考图生成视频",
+        description: "结合提示词、文本素材与参考图生成视频",
       },
       {
         href: "/generations/texts",

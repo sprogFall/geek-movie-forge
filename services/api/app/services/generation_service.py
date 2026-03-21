@@ -283,7 +283,7 @@ class GenerationService:
             provider=provider,
             model=payload.model,
             capability=ModelCapability.TEXT,
-            request_summary=payload.prompt,
+            request_summary=payload.prompt or source_text,
             coro=self._provider_gateway.generate_text(provider, gateway_payload),
         )
         segments = _parse_multi_video_segments(
@@ -294,7 +294,7 @@ class GenerationService:
             plan_id=f"plan_{uuid4().hex[:12]}",
             provider_id=payload.provider_id,
             model=payload.model,
-            prompt=payload.prompt,
+            prompt=payload.prompt or "",
             resolved_prompt=resolved_prompt,
             total_duration_seconds=payload.total_duration_seconds,
             segment_duration_seconds=payload.segment_duration_seconds,
@@ -356,7 +356,7 @@ class GenerationService:
             batch_id=f"batch_{uuid4().hex[:12]}",
             provider_id=payload.provider_id,
             model=payload.model,
-            prompt=payload.prompt,
+            prompt=payload.prompt or "",
             segment_count=len(segments),
             segments=segments,
         )
@@ -567,7 +567,7 @@ class GenerationService:
         owner_id: str,
         provider: ProviderRecord,
         model: str,
-        prompt: str,
+        prompt: str | None,
         preset_prompt: str | None,
         segment: VideoSegmentPlan,
         image_materials: list[VideoInputMaterial],
@@ -813,7 +813,7 @@ def _plan_segment_durations(total_duration_seconds: int, segment_duration_second
 
 def _build_multi_video_plan_source_text(
     *,
-    prompt: str,
+    prompt: str | None,
     total_duration_seconds: int,
     segment_durations: list[int],
     scene_prompt_texts: list[str],
@@ -822,9 +822,9 @@ def _build_multi_video_plan_source_text(
         f"总视频时长：{total_duration_seconds} 秒",
         f"分段数量：{len(segment_durations)}",
         f"每段时长：{', '.join(f'{item}秒' for item in segment_durations)}",
-        "核心创作需求：",
-        prompt,
     ]
+    if prompt:
+        lines.extend(["核心创作需求：", prompt])
     if scene_prompt_texts:
         lines.append("补充文本素材：")
         lines.extend(
@@ -915,7 +915,7 @@ def _coerce_plan_text(value: object) -> str | None:
 
 def _build_multi_video_segment_prompt(
     *,
-    prompt: str,
+    prompt: str | None,
     preset_prompt: str | None,
     segment: VideoSegmentPlan,
 ) -> str:

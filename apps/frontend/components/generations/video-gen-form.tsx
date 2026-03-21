@@ -132,10 +132,21 @@ export function VideoGenForm() {
 
   const selectedImageAssets = imageAssets.filter((a) => imageMaterialAssetIds.includes(a.asset_id));
   const selectedTextAssets = textAssets.filter((a) => scenePromptAssetIds.includes(a.asset_id));
+  const promptValue = prompt.trim();
   const manualScenePromptTexts = scenePromptTextInput
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean);
+  const imageMaterialUrlList = imageMaterialUrls
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const hasPrompt = promptValue.length > 0;
+  const hasScenePromptMaterials =
+    scenePromptAssetIds.length > 0 || manualScenePromptTexts.length > 0;
+  const hasTextGuidance = hasPrompt || hasScenePromptMaterials;
+  const hasVisualReferences =
+    imageMaterialAssetIds.length > 0 || imageMaterialUrlList.length > 0;
   const plannedSegments = plan?.segments ?? [];
 
   const activeSegment =
@@ -248,25 +259,9 @@ export function VideoGenForm() {
     }
   }
 
-  function buildCommonVideoPayload() {
-    const body: Record<string, unknown> = {
-      provider_id: providerId,
-      model,
-    };
-    if (selectedVideoProvider?.adapter_type === "volcengine_ark") {
-      body.options = { generate_audio: true };
-    }
-    if (prompt.trim()) {
-      body.prompt = prompt.trim();
-    }
-    if (imageMaterialAssetIds.length > 0) {
-      body.image_material_asset_ids = imageMaterialAssetIds;
-    }
-    if (imageMaterialUrls.trim()) {
-      body.image_material_urls = imageMaterialUrls
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean);
+  function appendTextGuidance(body: Record<string, unknown>) {
+    if (promptValue) {
+      body.prompt = promptValue;
     }
     if (scenePromptAssetIds.length > 0) {
       body.scene_prompt_asset_ids = scenePromptAssetIds;
@@ -277,8 +272,30 @@ export function VideoGenForm() {
     return body;
   }
 
+  function buildCommonVideoPayload() {
+    const body: Record<string, unknown> = {
+      provider_id: providerId,
+      model,
+    };
+    if (selectedVideoProvider?.adapter_type === "volcengine_ark") {
+      body.options = { generate_audio: true };
+    }
+    appendTextGuidance(body);
+    if (imageMaterialAssetIds.length > 0) {
+      body.image_material_asset_ids = imageMaterialAssetIds;
+    }
+    if (imageMaterialUrlList.length > 0) {
+      body.image_material_urls = imageMaterialUrlList;
+    }
+    return body;
+  }
+
   async function handleSingleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!hasTextGuidance && !hasVisualReferences) {
+      setError("请输入提示词，或选择/补充文本素材、参考图片后再生成视频");
+      return;
+    }
     setLoading(true);
     setError("");
     setResult(null);
@@ -301,8 +318,8 @@ export function VideoGenForm() {
 
   async function handlePlanSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!prompt.trim()) {
-      setError("请输入视频创意提示词后再生成切分方案");
+    if (!hasTextGuidance) {
+      setError("请输入提示词，或选择/补充文本素材后再生成切分方案");
       return;
     }
     setPlanning(true);
@@ -310,15 +327,14 @@ export function VideoGenForm() {
     setPlan(null);
     setBatchResult(null);
     try {
-      const response = await planMultiVideos({
-        provider_id: planProviderId,
-        model: planModel,
-        prompt: prompt.trim(),
-        total_duration_seconds: totalDurationSeconds,
-        segment_duration_seconds: segmentDurationSeconds,
-        scene_prompt_asset_ids: scenePromptAssetIds,
-        scene_prompt_texts: manualScenePromptTexts,
-      });
+      const response = await planMultiVideos(
+        appendTextGuidance({
+          provider_id: planProviderId,
+          model: planModel,
+          total_duration_seconds: totalDurationSeconds,
+          segment_duration_seconds: segmentDurationSeconds,
+        })
+      );
       setPlan(response);
       localStorage.setItem(LAST_PLAN_PROVIDER_KEY, planProviderId);
     } catch (err) {
@@ -336,7 +352,6 @@ export function VideoGenForm() {
     try {
       const response = await generateMultiVideos({
         ...buildCommonVideoPayload(),
-        prompt: prompt.trim(),
         segments: plan.segments,
       });
       setBatchResult(response);
@@ -359,7 +374,6 @@ export function VideoGenForm() {
       const previousLastFrameUrl = getLastFrameUrl(previousOutput);
       const response = await regenerateMultiVideoSegment({
         ...buildCommonVideoPayload(),
-        prompt: prompt.trim(),
         segment: {
           segment_index: segment.segment_index,
           title: segment.title,
@@ -702,55 +716,95 @@ export function VideoGenForm() {
         )}
 
         <div className="form-group">
-          <label className="form-label">提示词</label>
+          <label className="form-label">提示词与文本素材</label>
           <span className="form-hint">
             {mode === "single"
-              ? "直接描述要生成的视频内容。"
-              : "先由文本模型按总时长和单段时长生成切分方案，再确认批量生成。"}
+              ? "在同一个入口里组合主提示词和文本素材。你可以只写提示词、只选文本素材，或两者配合。"
+              : "主提示词和文本素材会一起参与切分规划与后续批量生成，不再强制必须单独填写提示词。"}
           </span>
-          <textarea
-            className="form-textarea"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="例如：赛博朋克城市追逐，镜头节奏紧张，结尾反转。"
-            rows={4}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">文本素材 / 剧情补充</label>
-          <span className="form-hint">
-            从文本素材库挑选分镜参考，或直接补充中文剧情提示。这里会参与视频提示和多视频切分规划。
-          </span>
-          <div className="form-actions" style={{ paddingTop: 0, flexWrap: "wrap" }}>
-            <button
-              className="btn btn-sm btn-secondary"
-              type="button"
-              onClick={() => void openAssetPicker("text")}
-            >
-              从文本素材库选择
-            </button>
-            <span style={{ color: "var(--muted)", fontSize: "0.88rem" }}>
-              已选 {scenePromptAssetIds.length} 条素材
-            </span>
-            {scenePromptAssetIds.length > 0 && (
-              <button
-                className="btn btn-sm btn-secondary"
-                type="button"
-                onClick={() => setScenePromptAssetIds([])}
+          <div className="video-brief-panel">
+            <div className="video-brief-summary" aria-live="polite">
+              <span className={`video-brief-chip${hasPrompt ? " is-active" : ""}`}>
+                {hasPrompt ? "主提示词已填写" : "主提示词可选"}
+              </span>
+              <span
+                className={`video-brief-chip${manualScenePromptTexts.length > 0 ? " is-active" : ""}`}
               >
-                清空文本素材
-              </button>
-            )}
+                {manualScenePromptTexts.length > 0
+                  ? `手动补充 ${manualScenePromptTexts.length} 条`
+                  : "可补充剧情线索"}
+              </span>
+              <span
+                className={`video-brief-chip${scenePromptAssetIds.length > 0 ? " is-active" : ""}`}
+              >
+                {scenePromptAssetIds.length > 0
+                  ? `已选素材 ${scenePromptAssetIds.length} 条`
+                  : "可选文本素材"}
+              </span>
+            </div>
+
+            <div className="video-brief-block">
+              <div className="video-brief-head">
+                <label className="form-label" htmlFor="video-prompt-input">
+                  主提示词
+                </label>
+                <span className="form-hint">
+                  {mode === "single"
+                    ? "先写核心画面、风格和情绪；没有也可以直接用下方文本素材驱动。"
+                    : "用于定义整体创意方向；留空时会优先根据文本素材规划分镜。"}
+                </span>
+              </div>
+              <textarea
+                id="video-prompt-input"
+                className="form-textarea"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="例如：赛博朋克城市追逐，镜头节奏紧张，结尾反转。"
+                rows={4}
+              />
+            </div>
+
+            <div className="video-brief-block">
+              <div className="video-brief-head">
+                <label className="form-label" htmlFor="video-scene-prompt-input">
+                  文本素材补充
+                </label>
+                <span className="form-hint">
+                  从素材库挑选分镜参考，或逐行补充剧情/镜头说明；会与主提示词一起参与生成。
+                </span>
+              </div>
+              <div className="form-actions video-brief-actions">
+                <button
+                  className="btn btn-sm btn-secondary"
+                  type="button"
+                  onClick={() => void openAssetPicker("text")}
+                >
+                  从文本素材库选择
+                </button>
+                <span style={{ color: "var(--muted)", fontSize: "0.88rem" }}>
+                  已选 {scenePromptAssetIds.length} 条素材
+                </span>
+                {scenePromptAssetIds.length > 0 && (
+                  <button
+                    className="btn btn-sm btn-secondary"
+                    type="button"
+                    onClick={() => setScenePromptAssetIds([])}
+                  >
+                    清空文本素材
+                  </button>
+                )}
+              </div>
+              {renderSelectedTextAssets()}
+              <textarea
+                id="video-scene-prompt-input"
+                className="form-textarea"
+                value={scenePromptTextInput}
+                onChange={(e) => setScenePromptTextInput(e.target.value)}
+                placeholder="补充剧情、角色状态、镜头氛围。每行一条。"
+                rows={4}
+              />
+            </div>
           </div>
-          {renderSelectedTextAssets()}
-          <textarea
-            className="form-textarea"
-            value={scenePromptTextInput}
-            onChange={(e) => setScenePromptTextInput(e.target.value)}
-            placeholder="补充剧情、角色状态、镜头氛围。每行一条。"
-            rows={4}
-          />
         </div>
 
         <div className="form-group">

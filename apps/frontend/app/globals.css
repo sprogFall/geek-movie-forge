@@ -875,6 +875,67 @@ select {
   font-size: 0.82rem;
 }
 
+.video-brief-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(190, 91, 45, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 249, 241, 0.96), rgba(255, 255, 255, 0.9)),
+    rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 10px 28px rgba(44, 30, 15, 0.05);
+}
+
+.video-brief-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.video-brief-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(116, 90, 58, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.video-brief-chip.is-active {
+  border-color: rgba(190, 91, 45, 0.24);
+  background: rgba(246, 220, 198, 0.62);
+  color: var(--accent);
+}
+
+.video-brief-block {
+  display: grid;
+  gap: 10px;
+}
+
+.video-brief-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.video-brief-head .form-hint {
+  max-width: 420px;
+  text-align: right;
+}
+
+.video-brief-actions {
+  padding-top: 0;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .selected-text-list,
 .segment-plan-list {
   display: grid;
@@ -1554,6 +1615,16 @@ select {
 
   .form-row-tight {
     grid-template-columns: 1fr;
+  }
+
+  .video-brief-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .video-brief-head .form-hint {
+    max-width: none;
+    text-align: left;
   }
 
   .segment-bridge-toggle {

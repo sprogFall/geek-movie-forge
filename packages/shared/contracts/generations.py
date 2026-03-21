@@ -60,11 +60,14 @@ class VideoGenerationRequest(BaseModel):
     @model_validator(mode="after")
     def validate_prompt(self) -> Self:
         has_prompt = bool(self.prompt or self.preset_prompt)
+        has_scene_prompt_materials = bool(self.scene_prompt_asset_ids or self.scene_prompt_texts)
         has_image_materials = bool(self.image_material_asset_ids or self.image_material_urls)
         has_draft_task = bool(str(self.options.get("draft_task_id") or "").strip())
-        if not (has_prompt or has_image_materials or has_draft_task):
+        if not (
+            has_prompt or has_scene_prompt_materials or has_image_materials or has_draft_task
+        ):
             raise ValueError(
-                "prompt or preset_prompt is required when no image materials or draft_task_id are provided"
+                "prompt, preset_prompt, or scene prompt text is required when no image materials or draft_task_id are provided"
             )
         return self
 
@@ -140,7 +143,7 @@ class MultiVideoPlanRequest(BaseModel):
 
     provider_id: str = Field(min_length=1)
     model: str = Field(min_length=1)
-    prompt: str = Field(min_length=1)
+    prompt: str | None = None
     preset_prompt: str | None = None
     total_duration_seconds: int = Field(ge=5, le=600)
     segment_duration_seconds: int = Field(ge=5, le=120)
@@ -152,6 +155,13 @@ class MultiVideoPlanRequest(BaseModel):
     def validate_durations(self) -> Self:
         if self.segment_duration_seconds > self.total_duration_seconds:
             raise ValueError("segment_duration_seconds must be <= total_duration_seconds")
+        if not (
+            self.prompt
+            or self.preset_prompt
+            or self.scene_prompt_asset_ids
+            or self.scene_prompt_texts
+        ):
+            raise ValueError("prompt, preset_prompt, or scene prompt text is required")
         return self
 
 
@@ -174,7 +184,7 @@ class MultiVideoGenerationRequest(BaseModel):
 
     provider_id: str = Field(min_length=1)
     model: str = Field(min_length=1)
-    prompt: str = Field(min_length=1)
+    prompt: str | None = None
     preset_prompt: str | None = None
     segments: list[VideoSegmentPlan] = Field(min_length=1)
     image_material_asset_ids: list[str] = Field(default_factory=list)
@@ -199,7 +209,7 @@ class MultiVideoSegmentRegenerationRequest(BaseModel):
 
     provider_id: str = Field(min_length=1)
     model: str = Field(min_length=1)
-    prompt: str = Field(min_length=1)
+    prompt: str | None = None
     preset_prompt: str | None = None
     segment: VideoSegmentPlan
     image_material_asset_ids: list[str] = Field(default_factory=list)

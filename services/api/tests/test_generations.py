@@ -295,6 +295,49 @@ def test_generate_video_allows_image_only_request() -> None:
     ]
 
 
+def test_generate_video_allows_text_material_only_request() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, headers)
+
+        prompt_asset = client.post(
+            "/api/v1/assets",
+            json={
+                "asset_type": "text",
+                "category": "reference",
+                "name": "scene-notes",
+                "content_text": "废土公路、逆光剪影、风沙掠过镜头。",
+            },
+            headers=headers,
+        )
+
+        response = client.post(
+            "/api/v1/generations/videos",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "count": 1,
+                "scene_prompt_asset_ids": [prompt_asset.json()["asset_id"]],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "废土公路" in body["resolved_prompt"]
+    assert fake_gateway.last_video_payload is not None
+    assert fake_gateway.last_video_payload["payload"].scene_prompt_texts == [
+        "废土公路、逆光剪影、风沙掠过镜头。"
+    ]
+
+
 def test_generate_text_and_query_saved_materials() -> None:
     fake_gateway = FakeProviderGateway()
 
@@ -389,6 +432,38 @@ def test_plan_multi_video_returns_ai_segment_plan() -> None:
     assert "只能输出 JSON 对象" in fake_gateway.last_text_payload["payload"].resolved_prompt
 
 
+def test_plan_multi_video_allows_text_material_only_request() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, headers)
+
+        response = client.post(
+            "/api/v1/generations/videos/plan",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-text-v1",
+                "total_duration_seconds": 26,
+                "segment_duration_seconds": 10,
+                "scene_prompt_texts": ["城市追逐，节奏紧张，结尾反转。"],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["prompt"] == ""
+    assert fake_gateway.last_text_payload is not None
+    assert "补充文本素材：" in fake_gateway.last_text_payload["payload"].source_text
+    assert "城市追逐，节奏紧张，结尾反转。" in fake_gateway.last_text_payload["payload"].source_text
+
+
 def test_generate_multi_video_returns_per_segment_results() -> None:
     partial_gateway = PartialFailVideoGateway()
 
@@ -435,6 +510,44 @@ def test_generate_multi_video_returns_per_segment_results() -> None:
     assert body["segments"][0]["generation"]["outputs"][0]["duration_seconds"] == 10
     assert body["segments"][1]["status"] == "error"
     assert "second segment failed" in body["segments"][1]["error_detail"]
+
+
+def test_generate_multi_video_allows_segment_only_request() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, headers)
+
+        response = client.post(
+            "/api/v1/generations/videos/batch",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "segments": [
+                    {
+                        "segment_index": 1,
+                        "title": "开场钩子",
+                        "duration_seconds": 10,
+                        "visual_prompt": "夜色城市俯拍，霓虹闪烁",
+                        "narration_text": "雨夜里，主角独自穿过空旷街头。",
+                    }
+                ],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["prompt"] == ""
+    assert body["segments"][0]["status"] == "success"
+    assert fake_gateway.last_video_payload is not None
+    assert "当前仅生成第 1 段视频。" in (fake_gateway.last_video_payload["payload"].resolved_prompt or "")
 
 
 def test_generate_multi_video_isolates_segment_prompts_and_enables_audio_by_default() -> None:
@@ -724,6 +837,40 @@ def test_regenerate_multi_video_segment_returns_single_result() -> None:
     assert body["visual_prompt"] == "雨中巷弄的高速跟随镜头"
     assert body["generation"]["outputs"][0]["url"] == "https://cdn.example.com/generated/video-1.mp4"
     assert body["token_usage"]["total_tokens"] == 165
+
+
+def test_regenerate_multi_video_segment_allows_segment_only_request() -> None:
+    fake_gateway = FakeProviderGateway()
+
+    with TestClient(app) as client:
+        headers = register_and_get_headers(client)
+        app.state.generation_service = GenerationService(
+            provider_service=app.state.provider_service,
+            asset_service=app.state.asset_service,
+            provider_gateway=fake_gateway,
+        )
+        provider_id = _create_provider(client, headers)
+
+        response = client.post(
+            "/api/v1/generations/videos/segments/regenerate",
+            json={
+                "provider_id": provider_id,
+                "model": "forge-video-v1",
+                "segment": {
+                    "segment_index": 1,
+                    "title": "重制片段",
+                    "duration_seconds": 8,
+                    "visual_prompt": "雨中巷弄的高速跟随镜头",
+                    "narration_text": "他在霓虹的反射中急速奔跑，心跳加速。",
+                },
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["resolved_prompt"].startswith("当前仅生成第 1 段视频。")
 
 
 def test_regenerate_multi_video_segment_propagates_errors() -> None:
