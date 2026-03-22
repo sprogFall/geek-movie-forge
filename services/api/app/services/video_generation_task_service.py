@@ -23,8 +23,7 @@ from services.api.app.services.generation_service import GenerationService
 logger = logging.getLogger(__name__)
 
 
-def _parse_timestamp(value: str) -> datetime:
-    return datetime.fromisoformat(value)
+from packages.shared.utils import parse_timestamp as _parse_timestamp
 
 
 class InMemoryVideoGenerationTaskService:

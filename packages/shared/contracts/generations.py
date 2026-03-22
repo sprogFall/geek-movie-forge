@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from packages.shared.contracts.assets import AssetResponse
 from packages.shared.enums.model_capability import ModelCapability
-from packages.shared.contracts.call_logs import TokenUsage
+from packages.shared.contracts.call_logs import TokenUsage as _CallLogTokenUsage  # noqa: F401
 
 
 class AssetSaveOptions(BaseModel):

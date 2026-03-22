@@ -20,14 +20,9 @@ import type {
   CallLogResponse,
 } from "@/types/api";
 
-const env = import.meta.env as ImportMetaEnv & {
-  readonly NEXT_PUBLIC_API_BASE_URL?: string;
-};
-
 const API_BASE =
-  env.VITE_API_BASE_URL ??
-  env.VITE_API_URL ??
-  env.NEXT_PUBLIC_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
   "http://localhost:8000";
 
 const TOKEN_KEY = "gmf_token";

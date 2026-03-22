@@ -68,8 +68,7 @@ _BUILTIN_PROVIDER_DEFS = (
 )
 
 
-def _parse_timestamp(value: str) -> datetime:
-    return datetime.fromisoformat(value)
+from packages.shared.utils import parse_timestamp as _parse_timestamp
 
 
 def _serialize_models(models: list[ProviderModelConfig]) -> list[dict]:
@@ -144,7 +143,7 @@ class InMemoryProviderService:
 
             provider.name = payload.name or provider.name
             provider.base_url = str(payload.base_url) if payload.base_url is not None else provider.base_url
-            provider.api_key = payload.api_key or provider.api_key
+            provider.api_key = payload.api_key if payload.api_key is not None else provider.api_key
             provider.models_json = (
                 _serialize_models(payload.models) if payload.models is not None else provider.models_json
             )

@@ -105,7 +105,7 @@ class CallLogRow(Base):
 class VideoGenerationTaskRow(Base):
     __tablename__ = "video_generation_tasks"
 
-    task_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     task_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), index=True, nullable=False)

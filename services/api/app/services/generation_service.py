@@ -781,18 +781,23 @@ def _strip_code_fences(text: str) -> str:
 def _looks_like_source_code(text: str) -> bool:
     code_markers = (
         "```",
+        "if __name__ ==",
+        "console.log(",
+        "print(",
+    )
+    structural_markers = (
         "import ",
         "from ",
         "def ",
         "class ",
-        "print(",
         "return ",
-        "if __name__ ==",
-        "console.log(",
     )
     stripped = text.strip()
     first_line = stripped.splitlines()[0] if stripped else ""
-    return any(marker in stripped for marker in code_markers) or first_line.endswith(":")
+    if any(marker in stripped for marker in code_markers):
+        return True
+    hits = sum(1 for marker in structural_markers if marker in stripped)
+    return hits >= 3 or (hits >= 2 and first_line.endswith(":"))
 
 
 def _should_enforce_chinese(task_type: str) -> bool:
